@@ -11,6 +11,13 @@ from dataclasses import dataclass, field, asdict
 GAMMA_API_BASE = "https://gamma-api.polymarket.com"
 POLYGON_RPC_URL = "https://polygon-rpc.com"
 
+
+def set_rpc_url(url):
+    global POLYGON_RPC_URL
+    if url:
+        POLYGON_RPC_URL = url
+
+
 # 合约地址
 CONTRACTS = {
     'CTF': '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045'.lower(),
@@ -1506,6 +1513,33 @@ def _parse_convert_event(log: Dict, user_address: str) -> Dict:
     }
 
 
+def fetch_all_activities(user_address: str, limit: int = 500) -> List[Dict]:
+    """
+    获取用户的所有活动记录 (带分页)
+    """
+    all_activities = []
+    offset = 0
+    while True:
+        try:
+            url = f"https://data-api.polymarket.com/activity?user={user_address}&limit={limit}&offset={offset}"
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            batch = resp.json()
+        except Exception as e:
+            print(f"[Neg-Risk] 获取活动记录失败 (offset={offset}): {e}")
+            break
+
+        if not isinstance(batch, list):
+            break
+
+        all_activities.extend(batch)
+        if len(batch) < limit:
+            break
+        offset += limit
+
+    return all_activities
+
+
 def get_user_all_chain_activity(
     user_address: str,
     event_slug: str = None
@@ -1535,14 +1569,7 @@ def get_user_all_chain_activity(
     }
     
     # 1. 获取 Activity API 记录 (包含交易)
-    try:
-        resp = requests.get(
-            f'https://data-api.polymarket.com/activity?user={user_address}&limit=1000',
-            timeout=30
-        )
-        activities = resp.json() if resp.status_code == 200 else []
-    except:
-        activities = []
+    activities = fetch_all_activities(user_address)
     
     # Activity 记录转换
     for a in activities:

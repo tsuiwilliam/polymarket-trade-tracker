@@ -40,6 +40,9 @@ const I18N = {
         simple_download_chart: '图表',
         simple_download_report: '报告',
         simple_download_data: '数据',
+        advanced_options: '高级选项',
+        custom_rpc_label: '自定义 RPC URL (可选)',
+        custom_rpc_hint: '使用私有 RPC 节点 (如 Alchemy/Infura) 可以提高数据获取速度并避免速率限制。',
         
         // 多选项查询页
         multi_title: '多选项市场查询',
@@ -155,6 +158,9 @@ const I18N = {
         simple_download_chart: 'Chart',
         simple_download_report: 'Report',
         simple_download_data: 'Data',
+        advanced_options: 'Advanced Options',
+        custom_rpc_label: 'Custom RPC URL (Optional)',
+        custom_rpc_hint: 'Using a private RPC node (e.g., Alchemy/Infura) can improve data fetching speed and avoid rate limits.',
         
         // Multi-option query page
         multi_title: 'Multi-Option Query',
