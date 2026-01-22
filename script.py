@@ -232,6 +232,20 @@ ORDER_FILLED_TOPIC = "0xd0a08e8c493f9c94f29311604c9de1b4e8c8d4c06bd0c789af57f2d6
 POLYGON_RPC_URL = "https://polygon-rpc.com"
 
 
+def set_rpc_url(url):
+    """设置全局 RPC URL"""
+    global POLYGON_RPC_URL
+    if url:
+        POLYGON_RPC_URL = url
+        # 同时更新 neg_risk 模块的 RPC
+        if NEG_RISK_MODULE_AVAILABLE:
+            try:
+                from neg_risk import set_rpc_url as neg_risk_set_rpc
+                neg_risk_set_rpc(url)
+            except ImportError:
+                pass
+
+
 def get_maker_taker_role(tx_hash, user_address):
     """
     通过链上 OrderFilled 事件判断用户是 maker 还是 taker
@@ -785,23 +799,37 @@ def fetch_trades(condition_id, user_address, page_limit=500):
 def fetch_activities(condition_id, user_address, limit=500):
     """
     使用 activity API 获取用户活动（包括 neg-risk 交易）
-    返回格式与 fetch_trades 兼容
+    返回格式与 fetch_trades 兼容，支持分页获取
     """
-    try:
-        url = f"https://data-api.polymarket.com/activity?user={user_address}&limit={limit}"
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-        activities = resp.json()
-    except requests.RequestException as exc:
-        print(f"获取活动错误: {exc}")
-        return []
+    all_activities = []
+    offset = 0
     
-    if not isinstance(activities, list):
-        return []
+    while True:
+        try:
+            url = f"https://data-api.polymarket.com/activity?user={user_address}&limit={limit}&offset={offset}"
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            batch = resp.json()
+        except requests.RequestException as exc:
+            print(f"获取活动错误 (offset={offset}): {exc}")
+            break
+
+        if not isinstance(batch, list):
+            break
+
+        if not batch:
+            break
+
+        all_activities.extend(batch)
+
+        if len(batch) < limit:
+            break
+
+        offset += limit
     
     # 过滤目标市场的 TRADE 类型活动
     trades = []
-    for a in activities:
+    for a in all_activities:
         if a.get("conditionId") == condition_id and a.get("type") == "TRADE":
             # 转换为 trades API 兼容的格式
             trade = {
@@ -871,7 +899,7 @@ def infer_resolved_side_from_trades(trades, threshold=PRICE_RESOLUTION_THRESHOLD
     return inferred, latest
 
 
-def run_analysis(market_query, user_address, resolved_arg="AUTO", output_dir=None, cancel_flag=None, lang='zh'):
+def run_analysis(market_query, user_address, resolved_arg="AUTO", output_dir=None, cancel_flag=None, lang='zh', rpc_url=None):
     """
     供外部调用的分析函数
     
@@ -882,6 +910,7 @@ def run_analysis(market_query, user_address, resolved_arg="AUTO", output_dir=Non
         output_dir: 输出目录，默认为当前目录
         cancel_flag: 可选的取消标志字典 {"cancelled": bool}
         lang: 语言 ('zh' 或 'en')，默认中文
+        rpc_url: 自定义 RPC URL (可选)
     
     返回:
         成功: (chart_file, report_file, trades_file, None) 三个文件路径
@@ -890,6 +919,10 @@ def run_analysis(market_query, user_address, resolved_arg="AUTO", output_dir=Non
     """
     import os
     
+    # 设置 RPC URL
+    if rpc_url:
+        set_rpc_url(rpc_url)
+
     # 检查是否取消
     if cancel_flag and cancel_flag.get("cancelled"):
         return None, None, None, "CANCELLED"
@@ -1449,7 +1482,7 @@ def run_analysis(market_query, user_address, resolved_arg="AUTO", output_dir=Non
     return chart_file, report_file, trades_file, None
 
 
-def run_analysis_by_condition_id(condition_id, user_address, market_title="未知市场", resolved_arg="AUTO", output_dir=None, cancel_flag=None, is_resolved=False, outcomes_str=None, lang='zh', event_slug=None):
+def run_analysis_by_condition_id(condition_id, user_address, market_title="未知市场", resolved_arg="AUTO", output_dir=None, cancel_flag=None, is_resolved=False, outcomes_str=None, lang='zh', event_slug=None, rpc_url=None):
     """
     通过 condition_id 直接分析（用于多选项市场查询）
     
@@ -1463,6 +1496,7 @@ def run_analysis_by_condition_id(condition_id, user_address, market_title="未�
         is_resolved: 市场是否已结算（从前端传入）
         outcomes_str: outcomes JSON 字符串（从前端传入）
         lang: 语言 ('zh' 或 'en')，默认中文
+        rpc_url: 自定义 RPC URL (可选)
     
     返回:
         成功: (chart_file, report_file, trades_file, None)
@@ -1470,6 +1504,10 @@ def run_analysis_by_condition_id(condition_id, user_address, market_title="未�
     """
     import os
     
+    # 设置 RPC URL
+    if rpc_url:
+        set_rpc_url(rpc_url)
+
     # 检查是否取消
     if cancel_flag and cancel_flag.get("cancelled"):
         return None, None, None, "CANCELLED"

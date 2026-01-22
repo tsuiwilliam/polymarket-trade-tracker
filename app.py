@@ -418,6 +418,7 @@ def multi_analyze():
     outcomes = data.get('outcomes', '["Yes", "No"]')
     lang = data.get('lang', 'zh')  # 默认中文
     event_slug = data.get('event_slug', '')  # 新增：用于来源分析
+    rpc_url = data.get('rpc_url', '').strip()  # 新增: 自定义 RPC
     
     if not condition_id:
         error_msg = 'Missing condition_id' if lang == 'en' else '缺少 condition_id'
@@ -465,7 +466,8 @@ def multi_analyze():
                 is_resolved=is_resolved,
                 outcomes_str=outcomes,
                 lang=lang,
-                event_slug=event_slug  # 新增：用于来源分析
+                event_slug=event_slug,  # 新增：用于来源分析
+                rpc_url=rpc_url  # 新增: 自定义 RPC
             )
             
             duration = round(time.time() - start_time, 1)
@@ -522,6 +524,7 @@ def query():
     market = data.get('market', '').strip()
     address = data.get('address', '').strip()
     lang = data.get('lang', 'zh')  # 默认中文
+    rpc_url = data.get('rpc_url', '').strip()  # 新增: 自定义 RPC
     
     if not market:
         error_msg = 'Please enter market name' if lang == 'en' else '请输入市场名称'
@@ -577,7 +580,8 @@ def query():
                 resolved_arg='AUTO',
                 output_dir=task_dir,
                 cancel_flag=cancel_flag,
-                lang=lang
+                lang=lang,
+                rpc_url=rpc_url  # 新增: 自定义 RPC
             )
             
             duration = round(time.time() - start_time, 1)
