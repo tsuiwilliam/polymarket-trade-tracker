@@ -296,13 +296,14 @@ def trader_analyze():
 
 
 def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_str, lang, user_id, start_time):
-    """Discovery mode: find all markets via slug generation, then analyze trader's trades."""
+    """Discovery mode: find all markets via slug generation, then fetch trades per-market."""
     import requests as req
     import datetime as dt
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     cancel_flag['percent'] = 2
 
-    # Phase 1: Discover all markets (0-40%)
+    # Phase 1: Discover all markets via Gamma API (0-40%)
     def progress_cb(completed, total):
         if total > 0:
             cancel_flag['percent'] = 2 + int(completed / total * 38)
@@ -332,80 +333,102 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
 
     cancel_flag['percent'] = 40
 
-    # Collect all condition IDs from discovered events
-    all_condition_ids = {}  # cid -> event info
-    for ev in events:
+    # Phase 2: Fetch trades per-market using trades API (40-90%)
+    # Use trades API (same as Multi-Option) for reliable results with neg-risk markets
+    TRADES_URL = 'https://data-api.polymarket.com/trades'
+    ACTIVITY_URL = 'https://data-api.polymarket.com/activity'
+
+    def fetch_event_trades(ev, session):
+        """Fetch trades for all condition IDs in an event using trades API with activity fallback."""
+        event_trades = []
+        event_cids = []
         for m in ev.get('markets', []):
             cid = m.get('condition_id', '')
-            if cid:
-                all_condition_ids[cid] = {
-                    'event_slug': ev['slug'],
-                    'event_title': ev['title'],
-                    'time_label': ev.get('time_label', ''),
-                    'question': m.get('question', ''),
-                    'outcomes': m.get('outcomes', '["Yes", "No"]'),
-                    'closed': m.get('closed', False),
-                }
+            if not cid:
+                continue
+            event_cids.append(cid)
 
-    # Phase 2: Fetch trader's activities (40-55%)
-    cancel_flag['percent'] = 42
-    all_activities = []
-    offset = 0
-    page_limit = 500
-    max_pages = 10
+            # Try trades API first (works for most markets including neg-risk)
+            try:
+                resp = session.get(TRADES_URL, params={
+                    'market': cid,
+                    'user': address,
+                    'limit': 500,
+                    'offset': 0,
+                }, timeout=15)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        batch = data.get('trades', [])
+                    elif isinstance(data, list):
+                        batch = data
+                    else:
+                        batch = []
+                    if batch:
+                        event_trades.extend(batch)
+                        continue
+            except Exception:
+                pass
 
-    for page_num in range(max_pages):
-        if cancel_flag.get('cancelled'):
-            tasks[task_id]['status'] = 'cancelled'
-            tasks[task_id]['error'] = 'Cancelled' if lang == 'en' else '已取消'
-            return
+            # Fallback: activity API filtered by conditionId
+            try:
+                resp = session.get(ACTIVITY_URL, params={
+                    'user': address,
+                    'limit': 500,
+                }, timeout=15)
+                if resp.status_code == 200:
+                    activities = resp.json()
+                    if isinstance(activities, list):
+                        for a in activities:
+                            if a.get('conditionId') == cid and a.get('type') == 'TRADE':
+                                event_trades.append(a)
+            except Exception:
+                pass
 
-        try:
-            activity_resp = req.get('https://data-api.polymarket.com/activity', params={
-                'user': address,
-                'limit': page_limit,
-                'offset': offset,
-            }, timeout=30)
+        return ev, event_trades, event_cids
 
-            if activity_resp.status_code != 200:
-                break
+    # Concurrent fetch trades for all discovered events
+    session = req.Session()
+    session.headers.update({'Accept': 'application/json'})
 
-            batch = activity_resp.json()
-            if not isinstance(batch, list) or len(batch) == 0:
-                break
-
-            all_activities.extend(batch)
-            if len(batch) < page_limit:
-                break
-            offset += page_limit
-        except Exception as e:
-            print(f"[Trader Discovery] Activity fetch error page {page_num}: {e}")
-            break
-
-        cancel_flag['percent'] = 42 + (page_num + 1) * 1
-
-    cancel_flag['percent'] = 55
-
-    # Get username
-    username = ''
-    trade_activities = [a for a in all_activities if a.get('type') == 'TRADE']
-    if trade_activities:
-        username = trade_activities[0].get('name', '') or trade_activities[0].get('pseudonym', '') or ''
-
-    # Group trader's trades by conditionId
-    trades_by_cid = {}
-    for a in trade_activities:
-        cid = a.get('conditionId', '')
-        if cid and cid in all_condition_ids:
-            if cid not in trades_by_cid:
-                trades_by_cid[cid] = []
-            trades_by_cid[cid].append(a)
-
-    # Phase 3: Analyze each discovered market (55-95%)
-    market_results = []
+    trades_results = {}  # event_slug -> (event_trades, event_cids)
+    completed_count = 0
     total_events = len(events)
+    username = ''
 
-    for ev_idx, ev in enumerate(events):
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_ev = {
+            executor.submit(fetch_event_trades, ev, session): ev
+            for ev in events
+        }
+
+        for future in as_completed(future_to_ev):
+            if cancel_flag.get('cancelled'):
+                executor.shutdown(wait=False, cancel_futures=True)
+                tasks[task_id]['status'] = 'cancelled'
+                tasks[task_id]['error'] = 'Cancelled' if lang == 'en' else '已取消'
+                return
+
+            completed_count += 1
+            cancel_flag['percent'] = 40 + int(completed_count / total_events * 50)
+
+            try:
+                ev, event_trades, event_cids = future.result()
+                trades_results[ev['slug']] = (event_trades, event_cids)
+
+                # Extract username from first trade found
+                if not username and event_trades:
+                    username = (event_trades[0].get('name', '')
+                                or event_trades[0].get('pseudonym', '') or '')
+            except Exception:
+                pass
+
+    cancel_flag['percent'] = 90
+
+    # Phase 3: Analyze results and compute stats (90-95%)
+    market_results = []
+
+    for ev in events:
         if cancel_flag.get('cancelled'):
             tasks[task_id]['status'] = 'cancelled'
             tasks[task_id]['error'] = 'Cancelled' if lang == 'en' else '已取消'
@@ -415,15 +438,9 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
         time_label = ev.get('time_label', '')
         event_slug = ev['slug']
 
-        # Collect trades across all sub-markets for this event
-        event_trades = []
-        event_cids = []
-        for m in ev.get('markets', []):
-            cid = m.get('condition_id', '')
-            if cid:
-                event_cids.append(cid)
-                if cid in trades_by_cid:
-                    event_trades.extend(trades_by_cid[cid])
+        event_trades, event_cids = trades_results.get(event_slug, ([], []))
+        if not event_cids:
+            event_cids = [m.get('condition_id', '') for m in ev.get('markets', []) if m.get('condition_id')]
 
         trade_count = len(event_trades)
 
@@ -432,7 +449,7 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
         sell_revenue = 0.0
         net_exposure = 0.0
         pnl = None
-        is_resolved = False
+        is_resolved = ev.get('markets', [{}])[0].get('closed', False) if ev.get('markets') else False
         resolved_side = None
         outcome_0_name = 'Up'
         outcome_1_name = 'Down'
@@ -492,28 +509,29 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
             outcome_0_name = outcome_names.get(0, 'Up')
             outcome_1_name = outcome_names.get(1, 'Down')
 
-        # Check resolution status via CLOB API (use first condition ID)
-        for cid in event_cids:
-            try:
-                market_resp = req.get(f'https://clob.polymarket.com/markets/{cid}', timeout=5)
-                if market_resp.status_code == 200:
-                    market_info = market_resp.json()
-                    is_resolved = market_info.get('closed', False)
-                    if is_resolved and trade_count > 0:
-                        tokens = market_info.get('tokens', [])
-                        for token in tokens:
-                            if token.get('winner', False):
-                                resolved_side = token.get('outcome', '')
-                                break
-                        if resolved_side:
-                            if resolved_side.lower() in [outcome_0_name.lower(), 'yes', 'up']:
-                                final_value = remaining_0 * 1.0
-                            else:
-                                final_value = remaining_1 * 1.0
-                            pnl = final_value - net_exposure
-                    break  # Only need to check one sub-market for resolution
-            except Exception:
-                pass
+        # Check resolution status via CLOB API (only for traded markets to save API calls)
+        if trade_count > 0:
+            for cid in event_cids:
+                try:
+                    market_resp = req.get(f'https://clob.polymarket.com/markets/{cid}', timeout=5)
+                    if market_resp.status_code == 200:
+                        market_info = market_resp.json()
+                        is_resolved = market_info.get('closed', False)
+                        if is_resolved:
+                            tokens = market_info.get('tokens', [])
+                            for token in tokens:
+                                if token.get('winner', False):
+                                    resolved_side = token.get('outcome', '')
+                                    break
+                            if resolved_side:
+                                if resolved_side.lower() in [outcome_0_name.lower(), 'yes', 'up']:
+                                    final_value = remaining_0 * 1.0
+                                else:
+                                    final_value = remaining_1 * 1.0
+                                pnl = final_value - net_exposure
+                        break
+                except Exception:
+                    pass
 
         time_range = time_label
         if first_time and last_time:
@@ -540,8 +558,6 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
             'time_range': time_range,
             'traded': trade_count > 0,
         })
-
-        cancel_flag['percent'] = 55 + int((ev_idx + 1) / total_events * 40)
 
     cancel_flag['percent'] = 95
 
