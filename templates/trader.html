@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polymarket Trade Tracker - Trader Analysis</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%236366f1'/%3E%3Cstop offset='100%25' stop-color='%23a855f7'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='6' fill='url(%23g)'/%3E%3Crect x='6' y='18' width='4' height='8' rx='1' fill='white' opacity='0.9'/%3E%3Crect x='14' y='12' width='4' height='14' rx='1' fill='white' opacity='0.9'/%3E%3Crect x='22' y='6' width='4' height='20' rx='1' fill='white' opacity='0.9'/%3E%3C/svg%3E">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6366f1',
+                        secondary: '#8b5cf6',
+                        dark: {
+                            900: '#0f0f23',
+                            800: '#1a1a2e',
+                            700: '#252542',
+                            600: '#2d2d4a',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .gradient-border {
+            position: relative;
+        }
+        .gradient-border::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            padding: 1px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6, #a855f7);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+        }
+        .type-btn {
+            transition: all 0.2s;
+        }
+        .type-btn.active {
+            background: rgba(99, 102, 241, 0.3);
+            border-color: rgba(99, 102, 241, 0.6);
+            color: white;
+        }
+        .type-btn:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        /* Page overlay transition */
+        .page-overlay {
+            position: fixed;
+            inset: 0;
+            background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+            z-index: 9999;
+            pointer-events: none;
+        }
+        .overlay-enter { animation: overlayIn 0.1s ease-out forwards; }
+        .overlay-exit { animation: overlayOut 0.15s ease-out forwards; }
+        @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes overlayOut { from { opacity: 1; } to { opacity: 0; } }
+        /* Mobile menu animation */
+        .mobile-menu-enter { animation: slideDown 0.25s ease-out; }
+        .mobile-menu-exit { animation: slideUp 0.2s ease-out forwards; }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideUp { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-10px); } }
+        /* Custom scrollbar for results table */
+        .results-scroll::-webkit-scrollbar { height: 6px; }
+        .results-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); border-radius: 3px; }
+        .results-scroll::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.4); border-radius: 3px; }
+    </style>
+</head>
+<body class="bg-dark-900 min-h-screen text-white">
+    <!-- Page transition overlay -->
+    <div id="pageOverlay" class="page-overlay overlay-exit"></div>
+
+    <!-- Top navigation bar -->
+    <nav class="fixed top-0 left-0 right-0 z-50 glass border-b border-white/10">
+        <div class="px-6 md:px-10 h-14 flex items-center justify-between">
+            <a href="/" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                <svg class="w-6 h-6 text-primary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                </svg>
+                <span class="font-semibold text-white hidden sm:inline">Polymarket Trade Tracker</span>
+            </a>
+            <div class="flex items-center gap-2 md:gap-4">
+                <div class="hidden md:flex items-center gap-2">
+                    <a href="/simple" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/10 transition-all">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <span data-i18n="nav_quick_query">Quick Query</span>
+                    </a>
+                    <a href="/multi" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/10 transition-all">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                        </svg>
+                        <span data-i18n="nav_multi_query">Multi-Option Query</span>
+                    </a>
+                    <a href="/trader" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white bg-primary/30 transition-all">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                        </svg>
+                        <span data-i18n="nav_trader">Trader Analysis</span>
+                    </a>
+                    <button onclick="toggleLang()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/10 transition-all">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+                        </svg>
+                        <span id="langText">English</span>
+                    </button>
+                </div>
+                <a href="https://x.com/leolopeleo" target="_blank" rel="noopener noreferrer" class="text-gray-400 hover:text-white transition-colors" title="Twitter">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                    </svg>
+                </a>
+                <button onclick="toggleMobileMenu()" class="md:hidden text-gray-400 hover:text-white transition-colors p-1">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <!-- Mobile dropdown menu -->
+        <div id="mobileMenu" class="hidden md:hidden">
+            <div class="px-4 py-3 space-y-1 flex flex-col items-end">
+                <a href="/simple" class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/10 transition-all">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    <span data-i18n="nav_quick_query">Quick Query</span>
+                </a>
+                <a href="/multi" class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/10 transition-all">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                    <span data-i18n="nav_multi_query">Multi-Option Query</span>
+                </a>
+                <a href="/trader" class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-white bg-primary/20">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                    <span data-i18n="nav_trader">Trader Analysis</span>
+                </a>
+                <button onclick="toggleLang()" class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/10 transition-all">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+                    <span id="langTextMobile">English</span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Background decoration -->
+    <div class="fixed inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute -top-40 -right-40 w-80 h-80 bg-primary/20 rounded-full blur-[100px]"></div>
+        <div class="absolute top-1/2 -left-40 w-80 h-80 bg-secondary/20 rounded-full blur-[100px]"></div>
+    </div>
+
+    <div class="relative z-10 max-w-6xl mx-auto px-4 py-8 pt-20">
+        <!-- Header -->
+        <header class="text-center mb-12">
+            <h1 class="text-4xl md:text-5xl font-bold mb-4">
+                <span class="gradient-text" data-i18n="trader_title">Trader Analysis</span>
+            </h1>
+            <p class="text-gray-400 text-lg" data-i18n="trader_subtitle">Analyze a trader's full day trade logs across a specific market type (15min, hourly, daily, etc.)</p>
+        </header>
+
+        <!-- Error message -->
+        <div id="errorMessage" class="hidden mb-6 p-4 bg-red-500/20 border border-red-500/50 rounded-xl text-red-400 text-center"></div>
+
+        <!-- Query form -->
+        <div class="glass rounded-2xl p-8 mb-8">
+            <!-- Wallet address -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-300 mb-2">
+                    <span class="inline-flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+                        </svg>
+                        <span data-i18n="trader_wallet_label">Wallet Address</span>
+                    </span>
+                </label>
+                <input type="text" id="address"
+                       placeholder="0x..."
+                       class="w-full px-4 py-3 bg-dark-800 border border-dark-600 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all font-mono">
+            </div>
+
+            <!-- Market type selector -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-300 mb-3">
+                    <span class="inline-flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <span data-i18n="trader_type_label">Market Type</span>
+                    </span>
+                </label>
+                <div class="grid grid-cols-3 md:grid-cols-7 gap-2" id="typeButtons">
+                    <button onclick="selectType('1min')" class="type-btn px-3 py-2 border border-dark-600 rounded-lg text-sm text-gray-400 text-center" data-type="1min">1 min</button>
+                    <button onclick="selectType('5min')" class="type-btn px-3 py-2 border border-dark-600 rounded-lg text-sm text-gray-400 text-center" data-type="5min">5 min</button>
+                    <button onclick="selectType('15min')" class="type-btn px-3 py-2 border border-dark-600 rounded-lg text-sm text-gray-400 text-center" data-type="15min">15 min</button>
+                    <button onclick="selectType('30min')" class="type-btn px-3 py-2 border border-dark-600 rounded-lg text-sm text-gray-400 text-center" data-type="30min">30 min</button>
+                    <button onclick="selectType('hourly')" class="type-btn px-3 py-2 border border-dark-600 rounded-lg text-sm text-gray-400 text-center" data-type="hourly" data-i18n="trader_type_hourly">Hourly</button>
+                    <button onclick="selectType('daily')" class="type-btn px-3 py-2 border border-dark-600 rounded-lg text-sm text-gray-400 text-center" data-type="daily" data-i18n="trader_type_daily">Daily</button>
+                    <button onclick="selectType('custom')" class="type-btn px-3 py-2 border border-dark-600 rounded-lg text-sm text-gray-400 text-center" data-type="custom" data-i18n="trader_type_custom">Custom</button>
+                </div>
+                <!-- Custom keyword input (hidden by default) -->
+                <div id="customKeywordWrap" class="hidden mt-3">
+                    <input type="text" id="customKeyword"
+                           data-i18n-placeholder="trader_custom_placeholder"
+                           placeholder="Enter market keyword, e.g., Bitcoin, Ethereum, Trump..."
+                           class="w-full px-4 py-3 bg-dark-800 border border-dark-600 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all">
+                </div>
+            </div>
+
+            <!-- Date filter -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-300 mb-2">
+                    <span class="inline-flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                        </svg>
+                        <span data-i18n="trader_date_label">Date Filter</span>
+                        <span class="text-gray-500 text-xs" data-i18n="trader_date_optional">(optional)</span>
+                    </span>
+                </label>
+                <input type="date" id="dateFilter"
+                       class="w-full md:w-64 px-4 py-3 bg-dark-800 border border-dark-600 rounded-xl text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all">
+            </div>
+
+            <!-- Buttons -->
+            <div class="flex gap-4">
+                <button id="analyzeBtn" onclick="startAnalysis()"
+                        class="flex-1 py-3 px-6 bg-gradient-to-r from-primary to-secondary rounded-xl font-semibold hover:opacity-90 transition-all hover:shadow-lg hover:shadow-primary/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none">
+                    <span class="inline-flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                        </svg>
+                        <span data-i18n="trader_btn_analyze">Start Analysis</span>
+                    </span>
+                </button>
+                <button id="cancelBtn" onclick="cancelAnalysis()"
+                        class="hidden py-3 px-6 bg-red-500/20 border border-red-500/50 rounded-xl text-red-400 hover:bg-red-500/30 transition-all">
+                    <span class="inline-flex items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                        <span data-i18n="trader_btn_cancel">Cancel</span>
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Progress -->
+        <div id="progressSection" class="hidden glass rounded-2xl p-8 mb-8">
+            <div class="flex items-center justify-between mb-4">
+                <span class="text-gray-300 flex items-center gap-2">
+                    <svg class="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                    <span id="progressText" data-i18n="trader_progress_fetching">Fetching trade activity...</span>
+                </span>
+                <span id="progressPercent" class="text-primary font-semibold text-xl">0%</span>
+            </div>
+            <div class="h-3 bg-dark-700 rounded-full overflow-hidden">
+                <div id="progressFill" class="h-full bg-gradient-to-r from-primary to-secondary rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <p class="mt-4 text-sm text-gray-500 text-center" data-i18n="trader_progress_note">Fetching and analyzing trades across multiple markets...</p>
+        </div>
+
+        <!-- Results -->
+        <div id="resultSection" class="hidden space-y-6">
+            <!-- Summary cards -->
+            <div id="summaryCards" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <!-- Dynamically filled -->
+            </div>
+
+            <!-- P&L and win rate cards -->
+            <div id="pnlCards" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <!-- Dynamically filled -->
+            </div>
+
+            <!-- Per-market results table -->
+            <div class="glass rounded-2xl p-6">
+                <h3 class="font-semibold mb-4 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
+                    </svg>
+                    <span data-i18n="trader_market_breakdown">Per-Market Breakdown</span>
+                </h3>
+                <div class="overflow-x-auto results-scroll">
+                    <table class="w-full text-sm" id="marketsTable">
+                        <thead>
+                            <tr class="text-gray-400 border-b border-dark-600">
+                                <th class="text-left py-3 px-2 font-medium">#</th>
+                                <th class="text-left py-3 px-2 font-medium min-w-[200px]" data-i18n="trader_col_market">Market</th>
+                                <th class="text-center py-3 px-2 font-medium" data-i18n="trader_col_trades">Trades</th>
+                                <th class="text-right py-3 px-2 font-medium" data-i18n="trader_col_buy">Buy Cost</th>
+                                <th class="text-right py-3 px-2 font-medium" data-i18n="trader_col_sell">Sell Revenue</th>
+                                <th class="text-right py-3 px-2 font-medium" data-i18n="trader_col_exposure">Net Exposure</th>
+                                <th class="text-center py-3 px-2 font-medium" data-i18n="trader_col_status">Status</th>
+                                <th class="text-right py-3 px-2 font-medium" data-i18n="trader_col_pnl">P&L</th>
+                                <th class="text-left py-3 px-2 font-medium" data-i18n="trader_col_time">Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="marketsBody">
+                            <!-- Dynamically filled -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- New analysis button -->
+            <div class="flex justify-center">
+                <button onclick="resetUI()" class="px-6 py-3 bg-dark-700 rounded-xl hover:bg-dark-600 transition-colors flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                    </svg>
+                    <span data-i18n="trader_btn_new">New Analysis</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/assets/i18n.js"></script>
+    <script>
+        let currentTaskId = null;
+        let pollInterval = null;
+        let selectedType = null;
+
+        function selectType(type) {
+            selectedType = type;
+            document.querySelectorAll('.type-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.type === type);
+            });
+            const customWrap = document.getElementById('customKeywordWrap');
+            if (type === 'custom') {
+                customWrap.classList.remove('hidden');
+                document.getElementById('customKeyword').focus();
+            } else {
+                customWrap.classList.add('hidden');
+            }
+        }
+
+        function showError(message) {
+            const errorEl = document.getElementById('errorMessage');
+            errorEl.textContent = message;
+            errorEl.classList.remove('hidden');
+            setTimeout(() => errorEl.classList.add('hidden'), 6000);
+        }
+
+        async function startAnalysis() {
+            const address = document.getElementById('address').value.trim();
+            const dateFilter = document.getElementById('dateFilter').value;
+            const keyword = document.getElementById('customKeyword').value.trim();
+
+            if (!address || !address.startsWith('0x') || address.length !== 42) {
+                showError(t('error_invalid_wallet'));
+                return;
+            }
+            if (!selectedType) {
+                showError(t('trader_error_no_type'));
+                return;
+            }
+            if (selectedType === 'custom' && !keyword) {
+                showError(t('trader_error_no_keyword'));
+                return;
+            }
+
+            // Show progress
+            document.getElementById('resultSection').classList.add('hidden');
+            document.getElementById('progressSection').classList.remove('hidden');
+            document.getElementById('analyzeBtn').disabled = true;
+            document.getElementById('cancelBtn').classList.remove('hidden');
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressPercent').textContent = '0%';
+
+            try {
+                const response = await fetch('/api/trader/analyze', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        address: address,
+                        market_type: selectedType,
+                        keyword: keyword,
+                        date: dateFilter,
+                        lang: getLang()
+                    })
+                });
+
+                const data = await response.json();
+                if (data.error) {
+                    showError(data.error);
+                    resetProgress();
+                    return;
+                }
+
+                currentTaskId = data.task_id;
+                pollStatus();
+            } catch (e) {
+                showError(t('error_fetch_failed') + ': ' + e.message);
+                resetProgress();
+            }
+        }
+
+        function pollStatus() {
+            pollInterval = setInterval(async () => {
+                if (!currentTaskId) {
+                    clearInterval(pollInterval);
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`/api/status/${currentTaskId}`);
+                    const data = await response.json();
+
+                    const percent = data.percent || 0;
+                    document.getElementById('progressFill').style.width = percent + '%';
+                    document.getElementById('progressPercent').textContent = percent + '%';
+
+                    if (percent > 30) {
+                        document.getElementById('progressText').textContent = t('trader_progress_analyzing');
+                    }
+
+                    if (data.status === 'completed') {
+                        clearInterval(pollInterval);
+                        showResults(data.result);
+                    } else if (data.status === 'error' || data.status === 'cancelled') {
+                        clearInterval(pollInterval);
+                        showError(data.error || t('error_fetch_failed'));
+                        resetProgress();
+                    }
+                } catch (e) {
+                    console.error('Poll failed:', e);
+                }
+            }, 1000);
+        }
+
+        async function cancelAnalysis() {
+            if (!currentTaskId) return;
+            try {
+                await fetch(`/api/cancel/${currentTaskId}`, {method: 'POST'});
+                clearInterval(pollInterval);
+                currentTaskId = null;
+                resetProgress();
+            } catch (e) {
+                console.error('Cancel failed:', e);
+            }
+        }
+
+        function showResults(result) {
+            document.getElementById('progressSection').classList.add('hidden');
+            document.getElementById('resultSection').classList.remove('hidden');
+            document.getElementById('analyzeBtn').disabled = false;
+            document.getElementById('cancelBtn').classList.add('hidden');
+
+            const s = result.summary;
+            const markets = result.markets;
+
+            // Summary cards
+            document.getElementById('summaryCards').innerHTML = `
+                <div class="glass rounded-2xl p-5 gradient-border">
+                    <div class="text-gray-400 text-xs mb-1">${t('trader_total_markets')}</div>
+                    <div class="text-2xl font-bold">${s.total_markets}</div>
+                    <div class="mt-2 text-xs text-gray-500">${s.keyword}</div>
+                </div>
+                <div class="glass rounded-2xl p-5 gradient-border">
+                    <div class="text-gray-400 text-xs mb-1">${t('trader_total_trades')}</div>
+                    <div class="text-2xl font-bold">${s.total_trades.toLocaleString()}</div>
+                    <div class="mt-2 text-xs text-gray-500">${s.date === 'All' ? t('trader_all_time') : s.date}</div>
+                </div>
+                <div class="glass rounded-2xl p-5 gradient-border">
+                    <div class="text-gray-400 text-xs mb-1">${t('trader_buy_volume')}</div>
+                    <div class="text-2xl font-bold">$${s.total_buy_cost.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                </div>
+                <div class="glass rounded-2xl p-5 gradient-border">
+                    <div class="text-gray-400 text-xs mb-1">${t('trader_sell_volume')}</div>
+                    <div class="text-2xl font-bold">$${s.total_sell_revenue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                </div>
+            `;
+
+            // P&L cards
+            const hasPnl = s.total_pnl !== null;
+            const pnlColor = hasPnl ? (s.total_pnl >= 0 ? 'text-green-500' : 'text-red-500') : 'text-yellow-500';
+            const pnlSign = hasPnl && s.total_pnl >= 0 ? '+' : '';
+            const winRateColor = s.win_rate !== null ? (s.win_rate >= 50 ? 'text-green-500' : 'text-red-500') : 'text-gray-500';
+
+            document.getElementById('pnlCards').innerHTML = `
+                <div class="glass rounded-2xl p-5 gradient-border">
+                    <div class="text-gray-400 text-xs mb-1">${t('trader_total_pnl')}</div>
+                    <div class="text-2xl font-bold ${pnlColor}">
+                        ${hasPnl ? pnlSign + '$' + Math.abs(s.total_pnl).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : t('trader_pending')}
+                    </div>
+                    <div class="mt-2 text-xs text-gray-500">${t('trader_settled')}: ${s.settled_count} | ${t('trader_unsettled_short')}: ${s.unsettled_count}</div>
+                </div>
+                <div class="glass rounded-2xl p-5 gradient-border">
+                    <div class="text-gray-400 text-xs mb-1">${t('trader_win_rate')}</div>
+                    <div class="text-2xl font-bold ${winRateColor}">
+                        ${s.win_rate !== null ? s.win_rate + '%' : '-'}
+                    </div>
+                    <div class="mt-2 text-xs text-gray-500">${s.settled_count > 0 ? `${s.wins}W / ${s.losses}L / ${s.breakeven}B` : t('trader_no_settled')}</div>
+                </div>
+                <div class="glass rounded-2xl p-5 gradient-border">
+                    <div class="text-gray-400 text-xs mb-1">${t('trader_net_exposure')}</div>
+                    <div class="text-2xl font-bold">$${s.total_net_exposure.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+                </div>
+                <div class="glass rounded-2xl p-5 gradient-border">
+                    <div class="text-gray-400 text-xs mb-1">${t('trader_username')}</div>
+                    <div class="text-lg font-bold truncate">${s.username || '-'}</div>
+                    <div class="mt-2 text-xs text-gray-500 font-mono">${s.address.slice(0,8)}...${s.address.slice(-6)}</div>
+                </div>
+            `;
+
+            // Markets table
+            let rows = '';
+            markets.forEach((m, i) => {
+                const pnlVal = m.pnl;
+                const pnlClass = pnlVal !== null ? (pnlVal > 0 ? 'text-green-500' : pnlVal < 0 ? 'text-red-500' : 'text-gray-400') : 'text-yellow-500';
+                const pnlText = pnlVal !== null ? (pnlVal >= 0 ? '+' : '') + '$' + Math.abs(pnlVal).toFixed(2) : '-';
+                const statusBadge = m.is_resolved
+                    ? `<span class="px-2 py-0.5 bg-green-500/20 text-green-400 rounded-full text-xs">${t('trader_resolved')}</span>`
+                    : `<span class="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs">${t('trader_open')}</span>`;
+
+                // Shorten the title for display
+                let shortTitle = m.title;
+                if (shortTitle.length > 60) {
+                    shortTitle = shortTitle.substring(0, 57) + '...';
+                }
+
+                rows += `
+                    <tr class="border-b border-dark-700 hover:bg-white/[0.02] transition-colors">
+                        <td class="py-3 px-2 text-gray-500">${i + 1}</td>
+                        <td class="py-3 px-2">
+                            <div class="text-white text-sm" title="${m.title}">${shortTitle}</div>
+                            <div class="text-gray-500 text-xs mt-0.5">${m.outcome_0_name} / ${m.outcome_1_name}</div>
+                        </td>
+                        <td class="py-3 px-2 text-center">${m.trade_count}</td>
+                        <td class="py-3 px-2 text-right">$${m.buy_cost.toFixed(2)}</td>
+                        <td class="py-3 px-2 text-right">$${m.sell_revenue.toFixed(2)}</td>
+                        <td class="py-3 px-2 text-right">$${m.net_exposure.toFixed(2)}</td>
+                        <td class="py-3 px-2 text-center">${statusBadge}</td>
+                        <td class="py-3 px-2 text-right font-semibold ${pnlClass}">${pnlText}</td>
+                        <td class="py-3 px-2 text-gray-400 text-xs whitespace-nowrap">${m.time_range}</td>
+                    </tr>
+                `;
+            });
+
+            document.getElementById('marketsBody').innerHTML = rows;
+        }
+
+        function resetProgress() {
+            document.getElementById('progressSection').classList.add('hidden');
+            document.getElementById('analyzeBtn').disabled = false;
+            document.getElementById('cancelBtn').classList.add('hidden');
+            currentTaskId = null;
+        }
+
+        function resetUI() {
+            document.getElementById('resultSection').classList.add('hidden');
+            resetProgress();
+        }
+
+        function toggleMobileMenu() {
+            const menu = document.getElementById('mobileMenu');
+            if (menu.classList.contains('hidden')) {
+                menu.classList.remove('hidden', 'mobile-menu-exit');
+                menu.classList.add('mobile-menu-enter');
+            } else {
+                menu.classList.remove('mobile-menu-enter');
+                menu.classList.add('mobile-menu-exit');
+                setTimeout(() => menu.classList.add('hidden'), 200);
+            }
+        }
+
+        // Page transition
+        function navigateWithTransition(href) {
+            const overlay = document.getElementById('pageOverlay');
+            overlay.classList.remove('overlay-exit');
+            overlay.classList.add('overlay-enter');
+            setTimeout(() => { window.location.href = href; }, 100);
+        }
+        document.querySelectorAll('a[href^="/"]').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                navigateWithTransition(this.getAttribute('href'));
+            });
+        });
+        window.addEventListener('pageshow', function(e) {
+            if (e.persisted) {
+                const overlay = document.getElementById('pageOverlay');
+                overlay.classList.remove('overlay-enter');
+                overlay.classList.add('overlay-exit');
+            }
+        });
+    </script>
+</body>
+</html>

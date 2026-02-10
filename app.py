@@ -113,6 +113,380 @@ def multi():
     return make_response_with_cookie(resp, user_id)
 
 
+@app.route('/trader')
+def trader():
+    """交易员账户分析页面"""
+    user_id, _ = record_visit('trader')
+    resp = make_response(render_template('trader.html'))
+    return make_response_with_cookie(resp, user_id)
+
+
+@app.route('/api/trader/analyze', methods=['POST'])
+def trader_analyze():
+    """
+    分析交易员在某类市场的全天交易记录
+    请求体: {"address": "钱包地址", "market_type": "15min/hourly/daily/custom", "keyword": "自定义关键词", "date": "YYYY-MM-DD", "lang": "zh/en"}
+    返回: {"task_id": "任务ID"}
+    """
+    import requests as req
+    import re
+    import datetime as dt
+    import json
+
+    data = request.get_json()
+    address = data.get('address', '').strip()
+    market_type = data.get('market_type', '').strip()
+    keyword = data.get('keyword', '').strip()
+    date_str = data.get('date', '').strip()
+    lang = data.get('lang', 'zh')
+
+    if not address or not address.startswith('0x') or len(address) != 42:
+        error_msg = 'Please enter a valid wallet address' if lang == 'en' else '请输入有效的钱包地址'
+        return jsonify({'error': error_msg}), 400
+
+    # Build search keyword from market type
+    type_keywords = {
+        '1min': '1 Minute',
+        '5min': '5 Minutes',
+        '15min': '15 Minutes',
+        '30min': '30 Minutes',
+        'hourly': 'Hourly',
+        'daily': 'Up or Down',
+    }
+
+    search_keyword = keyword if market_type == 'custom' and keyword else type_keywords.get(market_type, '')
+    if not search_keyword:
+        error_msg = 'Please select a market type or enter a keyword' if lang == 'en' else '请选择市场类型或输入关键词'
+        return jsonify({'error': error_msg}), 400
+
+    # Parse date filter
+    date_filter = None
+    if date_str:
+        try:
+            date_filter = dt.datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            pass
+
+    task_id = str(uuid.uuid4())[:8]
+    cancel_flag = {'cancelled': False, 'percent': 0}
+    tasks[task_id] = {
+        'status': 'running',
+        'percent': 0,
+        'cancel_flag': cancel_flag,
+        'market': f'Trader Analysis: {search_keyword}',
+        'address': address,
+        'result': None,
+        'error': None
+    }
+
+    user_id = get_or_create_user_id()
+    start_time = time.time()
+
+    def run_task():
+        try:
+            cancel_flag['percent'] = 5
+
+            # Step 1: Fetch user activities with pagination
+            all_activities = []
+            offset = 0
+            page_limit = 500
+            max_pages = 10  # Safety limit
+
+            for page_num in range(max_pages):
+                if cancel_flag.get('cancelled'):
+                    tasks[task_id]['status'] = 'cancelled'
+                    tasks[task_id]['error'] = 'Cancelled' if lang == 'en' else '已取消'
+                    return
+
+                try:
+                    activity_url = f'https://data-api.polymarket.com/activity'
+                    activity_resp = req.get(activity_url, params={
+                        'user': address,
+                        'limit': page_limit,
+                        'offset': offset,
+                    }, timeout=30)
+
+                    if activity_resp.status_code != 200:
+                        break
+
+                    batch = activity_resp.json()
+                    if not isinstance(batch, list) or len(batch) == 0:
+                        break
+
+                    all_activities.extend(batch)
+                    if len(batch) < page_limit:
+                        break
+                    offset += page_limit
+                except Exception as e:
+                    print(f"[Trader] Activity fetch error page {page_num}: {e}")
+                    break
+
+                cancel_flag['percent'] = 5 + (page_num + 1) * 3
+
+            if not all_activities:
+                tasks[task_id]['status'] = 'error'
+                tasks[task_id]['error'] = 'No activity found for this address' if lang == 'en' else '未找到该地址的交易活动'
+                return
+
+            cancel_flag['percent'] = 30
+
+            # Step 2: Filter activities by type and keyword
+            trade_activities = [a for a in all_activities if a.get('type') == 'TRADE']
+
+            # Market type pattern matching
+            type_patterns = {
+                '1min': [r'1\s*Minute'],
+                '5min': [r'5\s*Minutes?'],
+                '15min': [r'15\s*Minutes?'],
+                '30min': [r'30\s*Minutes?'],
+                'hourly': [r'Hourly', r'Hour'],
+                'daily': [r'Up or Down\s*[-–]\s*(?:January|February|March|April|May|June|July|August|September|October|November|December)'],
+            }
+
+            if market_type == 'custom':
+                patterns = [re.escape(search_keyword)]
+            else:
+                patterns = type_patterns.get(market_type, [re.escape(search_keyword)])
+
+            compiled_patterns = [re.compile(p, re.IGNORECASE) for p in patterns]
+
+            def matches_type(title):
+                if not title:
+                    return False
+                return any(p.search(title) for p in compiled_patterns)
+
+            filtered = [a for a in trade_activities if matches_type(a.get('title', ''))]
+
+            # Date filter
+            if date_filter:
+                day_start = int(date_filter.timestamp())
+                day_end = int((date_filter + dt.timedelta(days=1)).timestamp())
+                filtered = [a for a in filtered if day_start <= int(a.get('timestamp', 0)) < day_end]
+
+            if not filtered:
+                tasks[task_id]['status'] = 'error'
+                no_match_msg = (
+                    f'No trades found matching "{search_keyword}"'
+                    if lang == 'en'
+                    else f'未找到匹配 "{search_keyword}" 的交易记录'
+                )
+                if date_str:
+                    no_match_msg += f' ({date_str})'
+                tasks[task_id]['error'] = no_match_msg
+                return
+
+            cancel_flag['percent'] = 40
+
+            # Step 3: Group by conditionId
+            markets_data = {}
+            for a in filtered:
+                cid = a.get('conditionId', '')
+                if not cid:
+                    continue
+                if cid not in markets_data:
+                    markets_data[cid] = {
+                        'condition_id': cid,
+                        'title': a.get('title', 'Unknown'),
+                        'trades': [],
+                    }
+                markets_data[cid]['trades'].append(a)
+
+            cancel_flag['percent'] = 50
+
+            # Step 4: For each market, compute stats
+            market_results = []
+            total_markets = len(markets_data)
+
+            for idx, (cid, mdata) in enumerate(markets_data.items()):
+                if cancel_flag.get('cancelled'):
+                    tasks[task_id]['status'] = 'cancelled'
+                    tasks[task_id]['error'] = 'Cancelled' if lang == 'en' else '已取消'
+                    return
+
+                trades = mdata['trades']
+                trades.sort(key=lambda x: int(x.get('timestamp', 0)))
+
+                trade_count = len(trades)
+                title = mdata['title']
+
+                # Compute per-market stats
+                buy_cost = 0.0
+                sell_revenue = 0.0
+                buy_shares_0 = 0.0  # outcome 0 (Yes/Up)
+                sell_shares_0 = 0.0
+                buy_shares_1 = 0.0  # outcome 1 (No/Down)
+                sell_shares_1 = 0.0
+                buy_cost_0 = 0.0
+                sell_cost_0 = 0.0
+                buy_cost_1 = 0.0
+                sell_cost_1 = 0.0
+
+                outcome_names = {}
+                first_time = None
+                last_time = None
+
+                for t_item in trades:
+                    side = t_item.get('side', '').upper()
+                    size = float(t_item.get('size', 0))
+                    price = float(t_item.get('price', 0))
+                    cost = size * price
+                    outcome_idx = int(t_item.get('outcomeIndex', 0))
+                    outcome_name = t_item.get('outcome', '')
+                    ts = int(t_item.get('timestamp', 0))
+
+                    if outcome_name and outcome_idx not in outcome_names:
+                        outcome_names[outcome_idx] = outcome_name
+
+                    if first_time is None or ts < first_time:
+                        first_time = ts
+                    if last_time is None or ts > last_time:
+                        last_time = ts
+
+                    if side == 'BUY':
+                        buy_cost += cost
+                        if outcome_idx == 0:
+                            buy_shares_0 += size
+                            buy_cost_0 += cost
+                        else:
+                            buy_shares_1 += size
+                            buy_cost_1 += cost
+                    elif side == 'SELL':
+                        sell_revenue += cost
+                        if outcome_idx == 0:
+                            sell_shares_0 += size
+                            sell_cost_0 += cost
+                        else:
+                            sell_shares_1 += size
+                            sell_cost_1 += cost
+
+                remaining_0 = buy_shares_0 - sell_shares_0
+                remaining_1 = buy_shares_1 - sell_shares_1
+                net_exposure = (buy_cost_0 - sell_cost_0) + (buy_cost_1 - sell_cost_1)
+
+                outcome_0_name = outcome_names.get(0, 'Yes')
+                outcome_1_name = outcome_names.get(1, 'No')
+
+                # Check if market is resolved via Gamma API (quick check)
+                is_resolved = False
+                resolved_side = None
+                pnl = None
+
+                try:
+                    market_resp = req.get(f'https://clob.polymarket.com/markets/{cid}', timeout=5)
+                    if market_resp.status_code == 200:
+                        market_info = market_resp.json()
+                        is_resolved = market_info.get('closed', False)
+                        if is_resolved:
+                            # Determine resolved side from final price
+                            tokens = market_info.get('tokens', [])
+                            if tokens:
+                                for token in tokens:
+                                    winner = token.get('winner', False)
+                                    if winner:
+                                        token_outcome = token.get('outcome', '')
+                                        resolved_side = token_outcome
+                                        break
+
+                            if resolved_side:
+                                if resolved_side.lower() in [outcome_0_name.lower(), 'yes']:
+                                    final_value = remaining_0 * 1.0
+                                else:
+                                    final_value = remaining_1 * 1.0
+                                pnl = final_value - net_exposure
+                except Exception:
+                    pass
+
+                time_range = ''
+                if first_time and last_time:
+                    t_start = dt.datetime.fromtimestamp(first_time).strftime('%H:%M:%S')
+                    t_end = dt.datetime.fromtimestamp(last_time).strftime('%H:%M:%S')
+                    t_date = dt.datetime.fromtimestamp(first_time).strftime('%Y-%m-%d')
+                    time_range = f'{t_date} {t_start} - {t_end}'
+
+                market_results.append({
+                    'condition_id': cid,
+                    'title': title,
+                    'trade_count': trade_count,
+                    'buy_cost': round(buy_cost, 2),
+                    'sell_revenue': round(sell_revenue, 2),
+                    'net_exposure': round(net_exposure, 2),
+                    'remaining_0': round(remaining_0, 2),
+                    'remaining_1': round(remaining_1, 2),
+                    'outcome_0_name': outcome_0_name,
+                    'outcome_1_name': outcome_1_name,
+                    'is_resolved': is_resolved,
+                    'resolved_side': resolved_side,
+                    'pnl': round(pnl, 2) if pnl is not None else None,
+                    'time_range': time_range,
+                })
+
+                cancel_flag['percent'] = 50 + int((idx + 1) / total_markets * 40)
+
+            cancel_flag['percent'] = 90
+
+            # Step 5: Aggregate stats
+            total_trades = sum(m['trade_count'] for m in market_results)
+            total_buy_cost = sum(m['buy_cost'] for m in market_results)
+            total_sell_revenue = sum(m['sell_revenue'] for m in market_results)
+            total_net_exposure = sum(m['net_exposure'] for m in market_results)
+
+            settled_markets = [m for m in market_results if m['is_resolved'] and m['pnl'] is not None]
+            unsettled_markets = [m for m in market_results if not m['is_resolved'] or m['pnl'] is None]
+
+            total_pnl = sum(m['pnl'] for m in settled_markets) if settled_markets else None
+            wins = sum(1 for m in settled_markets if m['pnl'] > 0)
+            losses = sum(1 for m in settled_markets if m['pnl'] < 0)
+            breakeven = sum(1 for m in settled_markets if m['pnl'] == 0)
+            win_rate = (wins / len(settled_markets) * 100) if settled_markets else None
+
+            # Get username from first activity
+            username = ''
+            if filtered:
+                username = filtered[0].get('name', '') or filtered[0].get('pseudonym', '') or ''
+
+            # Sort markets by first trade time
+            market_results.sort(key=lambda m: m.get('time_range', ''))
+
+            cancel_flag['percent'] = 100
+            tasks[task_id]['status'] = 'completed'
+            tasks[task_id]['result'] = {
+                'summary': {
+                    'address': address,
+                    'username': username,
+                    'market_type': market_type,
+                    'keyword': search_keyword,
+                    'date': date_str or 'All',
+                    'total_markets': len(market_results),
+                    'total_trades': total_trades,
+                    'total_buy_cost': round(total_buy_cost, 2),
+                    'total_sell_revenue': round(total_sell_revenue, 2),
+                    'total_net_exposure': round(total_net_exposure, 2),
+                    'total_pnl': round(total_pnl, 2) if total_pnl is not None else None,
+                    'settled_count': len(settled_markets),
+                    'unsettled_count': len(unsettled_markets),
+                    'wins': wins,
+                    'losses': losses,
+                    'breakeven': breakeven,
+                    'win_rate': round(win_rate, 1) if win_rate is not None else None,
+                },
+                'markets': market_results,
+            }
+
+            duration = round(time.time() - start_time, 1)
+            db.record_query(user_id, 'trader', f'Trader: {search_keyword}', None, address, 'success', duration)
+
+        except Exception as e:
+            tasks[task_id]['status'] = 'error'
+            tasks[task_id]['error'] = str(e)
+            duration = round(time.time() - start_time, 1)
+            db.record_query(user_id, 'trader', f'Trader: {search_keyword}', None, address, 'error', duration)
+
+    thread = threading.Thread(target=run_task)
+    thread.start()
+
+    return jsonify({'task_id': task_id})
+
+
 @app.route('/api/multi/markets', methods=['POST'])
 def get_multi_markets():
     """

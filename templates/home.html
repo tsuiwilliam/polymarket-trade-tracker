@@ -152,6 +152,12 @@
                         </svg>
                         <span data-i18n="nav_multi_query">多选项市场查询</span>
                     </a>
+                    <a href="/trader" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/10 transition-all">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                        </svg>
+                        <span data-i18n="nav_trader">交易员分析</span>
+                    </a>
                     <button onclick="toggleLang()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/10 transition-all">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
@@ -188,6 +194,12 @@
                     </svg>
                     <span data-i18n="nav_multi_query">多选项市场查询</span>
                 </a>
+                <a href="/trader" class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/10 transition-all">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                    <span data-i18n="nav_trader">交易员分析</span>
+                </a>
                 <button onclick="toggleLang()" class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-300 hover:text-white hover:bg-white/10 transition-all">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
@@ -210,7 +222,7 @@
         </header>
 
         <!-- 功能卡片 -->
-        <div class="grid md:grid-cols-2 gap-6 mb-16">
+        <div class="grid md:grid-cols-3 gap-6 mb-16">
             <!-- 简单查询 -->
             <a href="/simple" class="glass rounded-2xl p-8 card-hover cursor-pointer group">
                 <div class="w-14 h-14 bg-primary/20 rounded-xl flex items-center justify-center mb-6 group-hover:bg-primary/30 transition-colors">
@@ -238,6 +250,23 @@
                 <h2 class="text-xl font-semibold mb-3" data-i18n="home_multi_title">多选项市场查询</h2>
                 <p class="text-gray-400 mb-4" data-i18n="home_multi_desc">通过市场 URL 查询包含多个子选项的市场，选择具体子市场进行分析。</p>
                 <div class="flex items-center text-secondary text-sm font-medium">
+                    <span data-i18n="home_start_query">开始查询</span>
+                    <svg class="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                </div>
+            </a>
+
+            <!-- 交易员分析 -->
+            <a href="/trader" class="glass rounded-2xl p-8 card-hover cursor-pointer group">
+                <div class="w-14 h-14 bg-emerald-500/20 rounded-xl flex items-center justify-center mb-6 group-hover:bg-emerald-500/30 transition-colors">
+                    <svg class="w-7 h-7 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                </div>
+                <h2 class="text-xl font-semibold mb-3" data-i18n="home_trader_title">交易员分析</h2>
+                <p class="text-gray-400 mb-4" data-i18n="home_trader_desc">分析交易员在特定市场类型的全天交易日志，查看盈亏、胜率、各市场明细。</p>
+                <div class="flex items-center text-emerald-500 text-sm font-medium">
                     <span data-i18n="home_start_query">开始查询</span>
                     <svg class="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
