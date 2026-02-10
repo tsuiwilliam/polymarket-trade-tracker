@@ -308,17 +308,20 @@ def batch_get_maker_taker_roles(trades, user_address, cancel_flag=None):
     """
     roles = {}
     user_addr_lower = user_address.lower()
-    
+
     # 收集唯一的 tx_hash
     unique_hashes = list(set(t.get("transactionHash") for t in trades if t.get("transactionHash")))
-    
+
     if not unique_hashes:
         return roles
-    
+
     print(f"正在批量查询 {len(unique_hashes)} 笔交易的 maker/taker 角色...")
-    
-    # 分批处理，每批最多 25 个请求
-    batch_size = 25
+
+    # Conservative batch size: eth_getTransactionReceipt = 15 CU each
+    # Alchemy free tier rate limit is strict; keep batches small
+    batch_size = 3
+    batch_delay = 2.0  # seconds between batches
+
     for batch_start in range(0, len(unique_hashes), batch_size):
         # 检查是否取消
         if cancel_flag:
@@ -329,7 +332,7 @@ def batch_get_maker_taker_roles(trades, user_address, cancel_flag=None):
             cancel_flag["percent"] = 20 + progress  # 20-80
 
         batch_hashes = unique_hashes[batch_start:batch_start + batch_size]
-        
+
         # 构建批量请求
         batch_payload = [
             {
@@ -340,28 +343,39 @@ def batch_get_maker_taker_roles(trades, user_address, cancel_flag=None):
             }
             for i, tx_hash in enumerate(batch_hashes)
         ]
-        
+
         try:
-            # 带重试的请求
+            # 带重试的请求 (with exponential backoff on 429)
             results = None
-            for retry in range(3):
+            for retry in range(4):
                 resp = requests.post(POLYGON_RPC_URL, json=batch_payload, timeout=30)
+
+                # Handle 429 rate limit with exponential backoff
+                if resp.status_code == 429:
+                    wait = 2 ** (retry + 1)  # 2s, 4s, 8s, 16s
+                    print(f"  RPC rate limited (429), waiting {wait}s...")
+                    time.sleep(wait)
+                    continue
+
                 resp.raise_for_status()
                 results = resp.json()
-                
+
                 # 检查返回是否为有效的 list
                 if isinstance(results, list) and len(results) == len(batch_hashes):
                     break
-                
+
                 # 返回异常，等待后重试
-                time.sleep(0.5)
-            
+                time.sleep(batch_delay)
+
+            if results is None:
+                raise ValueError("RPC 请求全部被限流 (429)")
+
             if not isinstance(results, list):
                 raise ValueError(f"RPC 返回格式错误: {type(results)}")
-            
+
             # 构建 id -> tx_hash 映射
             id_to_hash = {i: tx_hash for i, tx_hash in enumerate(batch_hashes)}
-            
+
             # 处理每个响应 (使用 id 匹配，因为响应顺序可能不同)
             for result in results:
                 rid = result.get("id")
@@ -369,50 +383,50 @@ def batch_get_maker_taker_roles(trades, user_address, cancel_flag=None):
                 if tx_hash is None:
                     continue
                 receipt = result.get("result")
-                
+
                 if receipt is None:
                     roles[tx_hash] = "UNKNOWN"
                     continue
-                
+
                 role = "UNKNOWN"
                 logs = receipt.get("logs", [])
-                
+
                 for log in logs:
                     topics = log.get("topics", [])
                     if not topics or topics[0].lower() != ORDER_FILLED_TOPIC.lower():
                         continue
                     if len(topics) < 4:
                         continue
-                    
+
                     maker = "0x" + topics[2][-40:].lower()
                     taker = "0x" + topics[3][-40:].lower()
-                    
+
                     if maker in CTF_EXCHANGE_ADDRESSES or taker in CTF_EXCHANGE_ADDRESSES:
                         continue
-                    
+
                     if taker == user_addr_lower:
                         role = "TAKER"
                         break
                     if maker == user_addr_lower:
                         role = "MAKER"
                         break
-                
+
                 roles[tx_hash] = role
-                
+
         except Exception as e:
             print(f"批量查询失败: {e}")
             # 失败的批次全部标记为 UNKNOWN
             for tx_hash in batch_hashes:
                 if tx_hash not in roles:
                     roles[tx_hash] = "UNKNOWN"
-        
+
         # 显示进度
         done = min(batch_start + batch_size, len(unique_hashes))
         print(f"  进度: {done}/{len(unique_hashes)} ({done * 100 // len(unique_hashes)}%)")
 
-        # Rate-limit between batches to avoid exceeding RPC compute units/second
+        # Rate-limit between batches to stay under Alchemy CU/s limit
         if batch_start + batch_size < len(unique_hashes):
-            time.sleep(0.5)
+            time.sleep(batch_delay)
 
     return roles
 
