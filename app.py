@@ -598,24 +598,31 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
     ACTIVITY_URL = 'https://data-api.polymarket.com/activity'
 
     def fetch_event_trades(ev, session):
-        """Fetch trades for all condition IDs in an event using trades API with activity fallback."""
+        """Fetch trades for all condition IDs in an event using trades API with activity fallback.
+        Uses pagination to retrieve ALL trades (matching script.py fetch_trades pattern)."""
         event_trades = []
         event_cids = []
+        page_limit = 500
+
         for m in ev.get('markets', []):
             cid = m.get('condition_id', '')
             if not cid:
                 continue
             event_cids.append(cid)
 
-            # Try trades API first (works for most markets including neg-risk)
+            # Try trades API first with pagination
+            cid_trades = []
             try:
-                resp = session.get(TRADES_URL, params={
-                    'market': cid,
-                    'user': address,
-                    'limit': 500,
-                    'offset': 0,
-                }, timeout=15)
-                if resp.status_code == 200:
+                offset = 0
+                while True:
+                    resp = session.get(TRADES_URL, params={
+                        'market': cid,
+                        'user': address,
+                        'limit': page_limit,
+                        'offset': offset,
+                    }, timeout=15)
+                    if resp.status_code != 200:
+                        break
                     data = resp.json()
                     if isinstance(data, dict):
                         batch = data.get('trades', [])
@@ -623,24 +630,37 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
                         batch = data
                     else:
                         batch = []
-                    if batch:
-                        event_trades.extend(batch)
-                        continue
+                    cid_trades.extend(batch)
+                    if len(batch) < page_limit:
+                        break
+                    offset += page_limit
             except Exception:
                 pass
 
-            # Fallback: activity API filtered by conditionId
+            if cid_trades:
+                event_trades.extend(cid_trades)
+                continue
+
+            # Fallback: activity API with pagination, filtered by conditionId
             try:
-                resp = session.get(ACTIVITY_URL, params={
-                    'user': address,
-                    'limit': 500,
-                }, timeout=15)
-                if resp.status_code == 200:
+                offset = 0
+                while True:
+                    resp = session.get(ACTIVITY_URL, params={
+                        'user': address,
+                        'limit': page_limit,
+                        'offset': offset,
+                    }, timeout=15)
+                    if resp.status_code != 200:
+                        break
                     activities = resp.json()
-                    if isinstance(activities, list):
-                        for a in activities:
-                            if a.get('conditionId') == cid and a.get('type') == 'TRADE':
-                                event_trades.append(a)
+                    if not isinstance(activities, list):
+                        break
+                    for a in activities:
+                        if a.get('conditionId') == cid and a.get('type') == 'TRADE':
+                            event_trades.append(a)
+                    if len(activities) < page_limit:
+                        break
+                    offset += page_limit
             except Exception:
                 pass
 
