@@ -637,6 +637,7 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
                 if len(batch) < page_limit:
                     break
                 offset += page_limit
+                time.sleep(0.15)
 
             if cid_trades:
                 event_trades.extend(cid_trades)
@@ -663,6 +664,7 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
                 if len(activities) < page_limit:
                     break
                 offset += page_limit
+                time.sleep(0.15)
 
         return ev, event_trades, event_cids
 
@@ -681,7 +683,7 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
     total_events = len(events)
     username = ''
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         future_to_ev = {
             executor.submit(fetch_event_trades, ev, session): ev
             for ev in events
