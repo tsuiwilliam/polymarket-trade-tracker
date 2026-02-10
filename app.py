@@ -295,6 +295,175 @@ def trader_analyze():
     return jsonify({'task_id': task_id})
 
 
+@app.route('/api/trader/report/<task_id>')
+def trader_report(task_id):
+    """Generate and download a full text report for a completed trader discovery analysis."""
+    import datetime as dt
+    from flask import Response
+
+    if task_id not in tasks:
+        return jsonify({'error': 'Task not found'}), 404
+
+    task = tasks[task_id]
+    if task['status'] != 'completed' or 'result' not in task:
+        return jsonify({'error': 'Task not completed'}), 400
+
+    result = task['result']
+    summary = result.get('summary', {})
+    markets = result.get('markets', [])
+    mode = result.get('mode', '')
+
+    lang = request.args.get('lang', 'en')
+
+    lines = []
+
+    # Header
+    lines.append('=' * 80)
+    lines.append('POLYMARKET TRADER ANALYSIS REPORT')
+    lines.append('=' * 80)
+    lines.append('')
+    lines.append(f'Wallet Address: {summary.get("address", "")}')
+    lines.append(f'Username:       {summary.get("username", "")}')
+    lines.append(f'Generated:      {dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+    lines.append('')
+
+    if mode == 'discovery':
+        lines.append(f'Mode:           Discovery (Slug-based)')
+        lines.append(f'Coin:           {summary.get("coin", "")}')
+        lines.append(f'Interval:       {summary.get("market_type", "")}')
+        lines.append(f'Date:           {summary.get("date", "")}')
+        lines.append(f'Total Cycles:   {summary.get("total_cycles", "")}')
+        lines.append(f'Discovered:     {summary.get("discovered_markets", 0)} markets')
+        lines.append(f'Traded:         {summary.get("traded_markets", 0)} markets')
+    else:
+        lines.append(f'Mode:           Activity (Keyword search)')
+        lines.append(f'Keyword:        {summary.get("keyword", "")}')
+        lines.append(f'Date:           {summary.get("date", "")}')
+        lines.append(f'Markets Found:  {summary.get("total_markets", 0)}')
+
+    lines.append('')
+    lines.append('-' * 80)
+    lines.append('SUMMARY')
+    lines.append('-' * 80)
+    lines.append(f'Total Trades:      {summary.get("total_trades", 0)}')
+    lines.append(f'Total Buy Cost:    $ {summary.get("total_buy_cost", 0):.2f}')
+    lines.append(f'Total Sell Revenue:$ {summary.get("total_sell_revenue", 0):.2f}')
+    lines.append(f'Net Exposure:      $ {summary.get("total_net_exposure", 0):.2f}')
+
+    total_pnl = summary.get('total_pnl')
+    if total_pnl is not None:
+        pnl_sign = '+' if total_pnl > 0 else ''
+        lines.append(f'Total P&L:         {pnl_sign}$ {total_pnl:.2f}')
+    else:
+        lines.append(f'Total P&L:         Pending')
+
+    lines.append(f'Settled Markets:   {summary.get("settled_count", 0)}')
+    lines.append(f'Unsettled Markets: {summary.get("unsettled_count", 0)}')
+
+    win_rate = summary.get('win_rate')
+    if win_rate is not None:
+        lines.append(f'Win Rate:          {win_rate:.1f}%  ({summary.get("wins", 0)}W / {summary.get("losses", 0)}L / {summary.get("breakeven", 0)}B)')
+    else:
+        lines.append(f'Win Rate:          N/A')
+
+    lines.append('')
+    lines.append('=' * 80)
+    lines.append('PER-MARKET BREAKDOWN')
+    lines.append('=' * 80)
+    lines.append('')
+
+    # Column header
+    hdr = f'{"#":>3}  {"Market":<58} {"Trades":>6}  {"Buy Cost":>12}  {"Sell Rev":>12}  {"Net Exp":>12}  {"Status":<8}  {"P&L":>12}  {"Time":<6}'
+    lines.append(hdr)
+    lines.append('-' * len(hdr))
+
+    for i, m in enumerate(markets, 1):
+        title = m.get('title', '')
+        if len(title) > 55:
+            title = title[:52] + '...'
+
+        trades = m.get('trade_count', 0)
+        trades_str = str(trades) if trades > 0 else '-'
+
+        if trades > 0:
+            buy_str = f'$ {m.get("buy_cost", 0):.2f}'
+            sell_str = f'$ {m.get("sell_revenue", 0):.2f}'
+            net_str = f'$ {m.get("net_exposure", 0):.2f}'
+        else:
+            buy_str = '-'
+            sell_str = '-'
+            net_str = '-'
+
+        status = 'Settled' if m.get('is_resolved') else 'Open'
+
+        pnl_val = m.get('pnl')
+        if trades > 0 and pnl_val is not None:
+            pnl_sign = '+' if pnl_val > 0 else ''
+            pnl_str = f'{pnl_sign}$ {pnl_val:.2f}'
+        elif trades > 0:
+            pnl_str = 'Pending'
+        else:
+            pnl_str = '-'
+
+        time_lbl = m.get('time_label', '')
+
+        row = f'{i:>3}  {title:<58} {trades_str:>6}  {buy_str:>12}  {sell_str:>12}  {net_str:>12}  {status:<8}  {pnl_str:>12}  {time_lbl:<6}'
+        lines.append(row)
+
+    # Detailed per-market sections for traded markets
+    traded = [m for m in markets if m.get('traded')]
+    if traded:
+        lines.append('')
+        lines.append('=' * 80)
+        lines.append('DETAILED MARKET ANALYSIS')
+        lines.append('=' * 80)
+
+        for i, m in enumerate(traded, 1):
+            lines.append('')
+            lines.append(f'--- Market #{i}: {m.get("title", "")} ---')
+            lines.append(f'  Condition ID:   {m.get("condition_id", "")}')
+            lines.append(f'  Event Slug:     {m.get("event_slug", "")}')
+            lines.append(f'  Time Window:    {m.get("time_label", "")}')
+            lines.append(f'  Trades:         {m.get("trade_count", 0)}')
+            lines.append(f'  Buy Cost:       $ {m.get("buy_cost", 0):.2f}')
+            lines.append(f'  Sell Revenue:   $ {m.get("sell_revenue", 0):.2f}')
+            lines.append(f'  Net Exposure:   $ {m.get("net_exposure", 0):.2f}')
+            lines.append(f'  Outcomes:       {m.get("outcome_0_name", "Up")} / {m.get("outcome_1_name", "Down")}')
+            lines.append(f'  Remaining {m.get("outcome_0_name", "Up"):>4}: {m.get("remaining_0", 0):.2f} shares')
+            lines.append(f'  Remaining {m.get("outcome_1_name", "Down"):>4}: {m.get("remaining_1", 0):.2f} shares')
+
+            if m.get('is_resolved'):
+                lines.append(f'  Status:         Settled ({m.get("resolved_side", "?")})')
+                pnl_val = m.get('pnl')
+                if pnl_val is not None:
+                    pnl_sign = '+' if pnl_val > 0 else ''
+                    lines.append(f'  P&L:            {pnl_sign}$ {pnl_val:.2f}')
+            else:
+                lines.append(f'  Status:         Open / Unsettled')
+
+            lines.append(f'  Trade Time:     {m.get("time_range", "")}')
+
+    lines.append('')
+    lines.append('=' * 80)
+    lines.append(f'End of Report  |  {len(traded)} traded markets  |  {summary.get("total_trades", 0)} total trades')
+    lines.append('=' * 80)
+
+    report_text = '\n'.join(lines)
+
+    # Generate filename
+    coin = summary.get('coin', 'unknown')
+    interval = summary.get('market_type', 'unknown')
+    date_str = summary.get('date', 'unknown')
+    addr_short = summary.get('address', '')[:10]
+    filename = f'trader_report_{coin}_{interval}_{date_str}_{addr_short}.txt'
+
+    return Response(
+        report_text,
+        mimetype='text/plain',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
+
+
 def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_str, lang, user_id, start_time):
     """Discovery mode: find all markets via slug generation, then fetch trades per-market."""
     import requests as req
