@@ -599,7 +599,8 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
 
     def fetch_event_trades(ev, session):
         """Fetch trades for all condition IDs in an event using trades API with activity fallback.
-        Uses pagination to retrieve ALL trades (matching script.py fetch_trades pattern)."""
+        Uses pagination to retrieve ALL trades (matching script.py fetch_trades pattern).
+        Error handling is per-request so a single failed page doesn't lose all prior results."""
         event_trades = []
         event_cids = []
         page_limit = 500
@@ -610,66 +611,70 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
                 continue
             event_cids.append(cid)
 
-            # Try trades API first with pagination
+            # Try trades API first with pagination (per-request error handling)
             cid_trades = []
-            try:
-                offset = 0
-                while True:
+            offset = 0
+            while True:
+                try:
                     resp = session.get(TRADES_URL, params={
                         'market': cid,
                         'user': address,
                         'limit': page_limit,
                         'offset': offset,
                         'takerOnly': 'false',
-                    }, timeout=15)
-                    if resp.status_code != 200:
-                        break
+                    }, timeout=30)
+                    resp.raise_for_status()
                     data = resp.json()
-                    if isinstance(data, dict):
-                        batch = data.get('trades', [])
-                    elif isinstance(data, list):
-                        batch = data
-                    else:
-                        batch = []
-                    cid_trades.extend(batch)
-                    if len(batch) < page_limit:
-                        break
-                    offset += page_limit
-            except Exception:
-                pass
+                except Exception:
+                    break
+                if isinstance(data, dict):
+                    batch = data.get('trades', [])
+                elif isinstance(data, list):
+                    batch = data
+                else:
+                    batch = []
+                cid_trades.extend(batch)
+                if len(batch) < page_limit:
+                    break
+                offset += page_limit
 
             if cid_trades:
                 event_trades.extend(cid_trades)
                 continue
 
-            # Fallback: activity API with pagination, filtered by conditionId
-            try:
-                offset = 0
-                while True:
+            # Fallback: activity API with pagination (per-request error handling)
+            offset = 0
+            while True:
+                try:
                     resp = session.get(ACTIVITY_URL, params={
                         'user': address,
                         'limit': page_limit,
                         'offset': offset,
-                    }, timeout=15)
-                    if resp.status_code != 200:
-                        break
+                    }, timeout=30)
+                    resp.raise_for_status()
                     activities = resp.json()
-                    if not isinstance(activities, list):
-                        break
-                    for a in activities:
-                        if a.get('conditionId') == cid and a.get('type') == 'TRADE':
-                            event_trades.append(a)
-                    if len(activities) < page_limit:
-                        break
-                    offset += page_limit
-            except Exception:
-                pass
+                except Exception:
+                    break
+                if not isinstance(activities, list):
+                    break
+                for a in activities:
+                    if a.get('conditionId') == cid and a.get('type') == 'TRADE':
+                        event_trades.append(a)
+                if len(activities) < page_limit:
+                    break
+                offset += page_limit
 
         return ev, event_trades, event_cids
 
     # Concurrent fetch trades for all discovered events
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
     session = req.Session()
     session.headers.update({'Accept': 'application/json'})
+    retry_strategy = Retry(total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504])
+    adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20, max_retries=retry_strategy)
+    session.mount('https://', adapter)
+    session.mount('http://', adapter)
 
     trades_results = {}  # event_slug -> (event_trades, event_cids)
     completed_count = 0
