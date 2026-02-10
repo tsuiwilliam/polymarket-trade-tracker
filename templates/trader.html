@@ -51,16 +51,27 @@
             -webkit-mask-composite: xor;
             mask-composite: exclude;
         }
-        .type-btn {
+        .type-btn, .coin-btn {
             transition: all 0.2s;
         }
-        .type-btn.active {
+        .type-btn.active, .coin-btn.active {
             background: rgba(99, 102, 241, 0.3);
             border-color: rgba(99, 102, 241, 0.6);
             color: white;
         }
-        .type-btn:hover:not(.active) {
+        .type-btn:hover:not(.active), .coin-btn:hover:not(.active) {
             background: rgba(255, 255, 255, 0.08);
+        }
+        .coin-btn.active {
+            background: rgba(245, 158, 11, 0.25);
+            border-color: rgba(245, 158, 11, 0.6);
+            color: #fbbf24;
+        }
+        .row-no-trade {
+            opacity: 0.35;
+        }
+        .row-no-trade:hover {
+            opacity: 0.6;
         }
         /* Page overlay transition */
         .page-overlay {
@@ -223,6 +234,29 @@
                 </div>
             </div>
 
+            <!-- Coin selector (shown for interval types) -->
+            <div id="coinSection" class="hidden mb-6">
+                <label class="block text-sm font-medium text-gray-300 mb-3">
+                    <span class="inline-flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <span data-i18n="trader_coin_label">Coin (Discovery Mode)</span>
+                        <span class="text-amber-400/70 text-xs" data-i18n="trader_coin_hint">Select to auto-discover all markets</span>
+                    </span>
+                </label>
+                <div class="flex flex-wrap gap-2" id="coinButtons">
+                    <button onclick="selectCoin('BTC')" class="coin-btn px-4 py-2 border border-dark-600 rounded-lg text-sm text-gray-400 font-medium" data-coin="BTC">BTC</button>
+                    <button onclick="selectCoin('ETH')" class="coin-btn px-4 py-2 border border-dark-600 rounded-lg text-sm text-gray-400 font-medium" data-coin="ETH">ETH</button>
+                    <button onclick="selectCoin('SOL')" class="coin-btn px-4 py-2 border border-dark-600 rounded-lg text-sm text-gray-400 font-medium" data-coin="SOL">SOL</button>
+                    <button onclick="selectCoin('XRP')" class="coin-btn px-4 py-2 border border-dark-600 rounded-lg text-sm text-gray-400 font-medium" data-coin="XRP">XRP</button>
+                    <button onclick="selectCoin('')" class="coin-btn px-4 py-2 border border-dark-600 rounded-lg text-sm text-gray-500 italic" data-coin="" data-i18n="trader_coin_none">None (keyword search)</button>
+                </div>
+                <p id="discoveryNote" class="hidden mt-2 text-xs text-amber-400/60">
+                    <span data-i18n="trader_discovery_note">Discovery mode: will find all markets for this coin on the selected date, then check trader's trades for each.</span>
+                </p>
+            </div>
+
             <!-- Date filter -->
             <div class="mb-6">
                 <label class="block text-sm font-medium text-gray-300 mb-2">
@@ -231,7 +265,8 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                         </svg>
                         <span data-i18n="trader_date_label">Date Filter</span>
-                        <span class="text-gray-500 text-xs" data-i18n="trader_date_optional">(optional)</span>
+                        <span id="dateOptionalLabel" class="text-gray-500 text-xs" data-i18n="trader_date_optional">(optional)</span>
+                        <span id="dateRequiredLabel" class="hidden text-amber-400 text-xs" data-i18n="trader_date_required">(required for discovery)</span>
                     </span>
                 </label>
                 <input type="date" id="dateFilter"
@@ -246,7 +281,7 @@
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
                         </svg>
-                        <span data-i18n="trader_btn_analyze">Start Analysis</span>
+                        <span id="analyzeBtnText" data-i18n="trader_btn_analyze">Start Analysis</span>
                     </span>
                 </button>
                 <button id="cancelBtn" onclick="cancelAnalysis()"
@@ -275,11 +310,21 @@
             <div class="h-3 bg-dark-700 rounded-full overflow-hidden">
                 <div id="progressFill" class="h-full bg-gradient-to-r from-primary to-secondary rounded-full transition-all duration-300" style="width: 0%"></div>
             </div>
-            <p class="mt-4 text-sm text-gray-500 text-center" data-i18n="trader_progress_note">Fetching and analyzing trades across multiple markets...</p>
+            <p class="mt-4 text-sm text-gray-500 text-center" id="progressNote" data-i18n="trader_progress_note">Fetching and analyzing trades across multiple markets...</p>
         </div>
 
         <!-- Results -->
         <div id="resultSection" class="hidden space-y-6">
+            <!-- Discovery summary (shown only in discovery mode) -->
+            <div id="discoverySummary" class="hidden glass rounded-2xl p-5 border border-amber-500/20">
+                <div class="flex items-center gap-3 text-amber-400">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <span id="discoveryText" class="text-sm"></span>
+                </div>
+            </div>
+
             <!-- Summary cards -->
             <div id="summaryCards" class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <!-- Dynamically filled -->
@@ -288,6 +333,14 @@
             <!-- P&L and win rate cards -->
             <div id="pnlCards" class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <!-- Dynamically filled -->
+            </div>
+
+            <!-- Toggle for showing all markets in discovery mode -->
+            <div id="showAllToggle" class="hidden flex items-center justify-end gap-2">
+                <label class="text-sm text-gray-400 cursor-pointer flex items-center gap-2">
+                    <input type="checkbox" id="showAllCheckbox" onchange="toggleShowAll()" class="rounded border-dark-600 bg-dark-800 text-primary focus:ring-primary">
+                    <span data-i18n="trader_show_all">Show all markets (including untraded)</span>
+                </label>
             </div>
 
             <!-- Per-market results table -->
@@ -337,18 +390,80 @@
         let currentTaskId = null;
         let pollInterval = null;
         let selectedType = null;
+        let selectedCoin = '';
+        let lastResult = null; // store for toggle
+
+        // Interval types that support discovery
+        const discoveryTypes = ['1min', '5min', '15min', '30min', 'hourly'];
 
         function selectType(type) {
             selectedType = type;
             document.querySelectorAll('.type-btn').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.type === type);
             });
+
             const customWrap = document.getElementById('customKeywordWrap');
+            const coinSection = document.getElementById('coinSection');
+
             if (type === 'custom') {
                 customWrap.classList.remove('hidden');
+                coinSection.classList.add('hidden');
+                selectedCoin = '';
                 document.getElementById('customKeyword').focus();
             } else {
                 customWrap.classList.add('hidden');
+            }
+
+            // Show/hide coin selector for interval types
+            if (discoveryTypes.includes(type)) {
+                coinSection.classList.remove('hidden');
+            } else {
+                coinSection.classList.add('hidden');
+                selectedCoin = '';
+                updateCoinUI();
+            }
+
+            updateDateRequired();
+            updateButtonText();
+        }
+
+        function selectCoin(coin) {
+            selectedCoin = coin;
+            updateCoinUI();
+            updateDateRequired();
+            updateButtonText();
+        }
+
+        function updateCoinUI() {
+            document.querySelectorAll('.coin-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.coin === selectedCoin);
+            });
+            const note = document.getElementById('discoveryNote');
+            if (selectedCoin) {
+                note.classList.remove('hidden');
+            } else {
+                note.classList.add('hidden');
+            }
+        }
+
+        function updateDateRequired() {
+            const optLabel = document.getElementById('dateOptionalLabel');
+            const reqLabel = document.getElementById('dateRequiredLabel');
+            if (selectedCoin && discoveryTypes.includes(selectedType)) {
+                optLabel.classList.add('hidden');
+                reqLabel.classList.remove('hidden');
+            } else {
+                optLabel.classList.remove('hidden');
+                reqLabel.classList.add('hidden');
+            }
+        }
+
+        function updateButtonText() {
+            const btnText = document.getElementById('analyzeBtnText');
+            if (selectedCoin && discoveryTypes.includes(selectedType)) {
+                btnText.textContent = t('trader_btn_discover');
+            } else {
+                btnText.textContent = t('trader_btn_analyze');
             }
         }
 
@@ -363,6 +478,7 @@
             const address = document.getElementById('address').value.trim();
             const dateFilter = document.getElementById('dateFilter').value;
             const keyword = document.getElementById('customKeyword').value.trim();
+            const useDiscovery = selectedCoin && discoveryTypes.includes(selectedType);
 
             if (!address || !address.startsWith('0x') || address.length !== 42) {
                 showError(t('error_invalid_wallet'));
@@ -376,6 +492,10 @@
                 showError(t('trader_error_no_keyword'));
                 return;
             }
+            if (useDiscovery && !dateFilter) {
+                showError(t('trader_error_no_date'));
+                return;
+            }
 
             // Show progress
             document.getElementById('resultSection').classList.add('hidden');
@@ -385,17 +505,28 @@
             document.getElementById('progressFill').style.width = '0%';
             document.getElementById('progressPercent').textContent = '0%';
 
+            if (useDiscovery) {
+                document.getElementById('progressNote').textContent = t('trader_progress_discovering');
+            } else {
+                document.getElementById('progressNote').textContent = t('trader_progress_note');
+            }
+
             try {
+                const body = {
+                    address: address,
+                    market_type: selectedType,
+                    keyword: keyword,
+                    date: dateFilter,
+                    lang: getLang()
+                };
+                if (useDiscovery) {
+                    body.coin = selectedCoin;
+                }
+
                 const response = await fetch('/api/trader/analyze', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        address: address,
-                        market_type: selectedType,
-                        keyword: keyword,
-                        date: dateFilter,
-                        lang: getLang()
-                    })
+                    body: JSON.stringify(body)
                 });
 
                 const data = await response.json();
@@ -428,7 +559,14 @@
                     document.getElementById('progressFill').style.width = percent + '%';
                     document.getElementById('progressPercent').textContent = percent + '%';
 
-                    if (percent > 30) {
+                    // Update progress text based on phase
+                    if (percent <= 40) {
+                        document.getElementById('progressText').textContent = selectedCoin
+                            ? t('trader_progress_discovering')
+                            : t('trader_progress_fetching');
+                    } else if (percent <= 55) {
+                        document.getElementById('progressText').textContent = t('trader_progress_fetching');
+                    } else {
                         document.getElementById('progressText').textContent = t('trader_progress_analyzing');
                     }
 
@@ -459,6 +597,7 @@
         }
 
         function showResults(result) {
+            lastResult = result;
             document.getElementById('progressSection').classList.add('hidden');
             document.getElementById('resultSection').classList.remove('hidden');
             document.getElementById('analyzeBtn').disabled = false;
@@ -466,12 +605,31 @@
 
             const s = result.summary;
             const markets = result.markets;
+            const isDiscovery = result.mode === 'discovery';
+
+            // Discovery summary banner
+            const discoverySummaryEl = document.getElementById('discoverySummary');
+            const showAllToggleEl = document.getElementById('showAllToggle');
+            if (isDiscovery) {
+                discoverySummaryEl.classList.remove('hidden');
+                document.getElementById('discoveryText').textContent = t('trader_discovery_result', {
+                    discovered: s.discovered_markets,
+                    cycles: s.total_cycles,
+                    traded: s.traded_markets,
+                    coin: s.coin
+                });
+                showAllToggleEl.classList.remove('hidden');
+            } else {
+                discoverySummaryEl.classList.add('hidden');
+                showAllToggleEl.classList.add('hidden');
+            }
 
             // Summary cards
+            const marketsLabel = isDiscovery ? t('trader_traded_markets') : t('trader_total_markets');
             document.getElementById('summaryCards').innerHTML = `
                 <div class="glass rounded-2xl p-5 gradient-border">
-                    <div class="text-gray-400 text-xs mb-1">${t('trader_total_markets')}</div>
-                    <div class="text-2xl font-bold">${s.total_markets}</div>
+                    <div class="text-gray-400 text-xs mb-1">${marketsLabel}</div>
+                    <div class="text-2xl font-bold">${isDiscovery ? s.traded_markets + '/' + s.discovered_markets : s.total_markets}</div>
                     <div class="mt-2 text-xs text-gray-500">${s.keyword}</div>
                 </div>
                 <div class="glass rounded-2xl p-5 gradient-border">
@@ -521,41 +679,65 @@
                 </div>
             `;
 
-            // Markets table
+            // Render markets table
+            renderMarketsTable(markets, isDiscovery);
+        }
+
+        function renderMarketsTable(markets, isDiscovery) {
+            const showAll = isDiscovery && document.getElementById('showAllCheckbox').checked;
             let rows = '';
-            markets.forEach((m, i) => {
+            let idx = 0;
+
+            markets.forEach((m) => {
+                const traded = m.traded !== undefined ? m.traded : true;
+                if (!showAll && isDiscovery && !traded) return;
+
+                idx++;
+                const noTradeClass = (isDiscovery && !traded) ? 'row-no-trade' : '';
                 const pnlVal = m.pnl;
-                const pnlClass = pnlVal !== null ? (pnlVal > 0 ? 'text-green-500' : pnlVal < 0 ? 'text-red-500' : 'text-gray-400') : 'text-yellow-500';
-                const pnlText = pnlVal !== null ? (pnlVal >= 0 ? '+' : '') + '$' + Math.abs(pnlVal).toFixed(2) : '-';
+                const pnlClass = traded
+                    ? (pnlVal !== null ? (pnlVal > 0 ? 'text-green-500' : pnlVal < 0 ? 'text-red-500' : 'text-gray-400') : 'text-yellow-500')
+                    : 'text-gray-600';
+                const pnlText = traded
+                    ? (pnlVal !== null ? (pnlVal >= 0 ? '+' : '') + '$' + Math.abs(pnlVal).toFixed(2) : '-')
+                    : '-';
                 const statusBadge = m.is_resolved
                     ? `<span class="px-2 py-0.5 bg-green-500/20 text-green-400 rounded-full text-xs">${t('trader_resolved')}</span>`
                     : `<span class="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded-full text-xs">${t('trader_open')}</span>`;
 
-                // Shorten the title for display
                 let shortTitle = m.title;
                 if (shortTitle.length > 60) {
                     shortTitle = shortTitle.substring(0, 57) + '...';
                 }
 
+                const timeDisplay = m.time_label || m.time_range || '';
+                const tradeCountDisplay = traded ? m.trade_count : `<span class="text-gray-600">${t('trader_no_trades')}</span>`;
+
                 rows += `
-                    <tr class="border-b border-dark-700 hover:bg-white/[0.02] transition-colors">
-                        <td class="py-3 px-2 text-gray-500">${i + 1}</td>
+                    <tr class="border-b border-dark-700 hover:bg-white/[0.02] transition-colors ${noTradeClass}">
+                        <td class="py-3 px-2 text-gray-500">${idx}</td>
                         <td class="py-3 px-2">
                             <div class="text-white text-sm" title="${m.title}">${shortTitle}</div>
-                            <div class="text-gray-500 text-xs mt-0.5">${m.outcome_0_name} / ${m.outcome_1_name}</div>
+                            <div class="text-gray-500 text-xs mt-0.5">${m.outcome_0_name || 'Up'} / ${m.outcome_1_name || 'Down'}</div>
                         </td>
-                        <td class="py-3 px-2 text-center">${m.trade_count}</td>
-                        <td class="py-3 px-2 text-right">$${m.buy_cost.toFixed(2)}</td>
-                        <td class="py-3 px-2 text-right">$${m.sell_revenue.toFixed(2)}</td>
-                        <td class="py-3 px-2 text-right">$${m.net_exposure.toFixed(2)}</td>
+                        <td class="py-3 px-2 text-center">${tradeCountDisplay}</td>
+                        <td class="py-3 px-2 text-right">${traded ? '$' + m.buy_cost.toFixed(2) : '-'}</td>
+                        <td class="py-3 px-2 text-right">${traded ? '$' + m.sell_revenue.toFixed(2) : '-'}</td>
+                        <td class="py-3 px-2 text-right">${traded ? '$' + m.net_exposure.toFixed(2) : '-'}</td>
                         <td class="py-3 px-2 text-center">${statusBadge}</td>
                         <td class="py-3 px-2 text-right font-semibold ${pnlClass}">${pnlText}</td>
-                        <td class="py-3 px-2 text-gray-400 text-xs whitespace-nowrap">${m.time_range}</td>
+                        <td class="py-3 px-2 text-gray-400 text-xs whitespace-nowrap">${timeDisplay}</td>
                     </tr>
                 `;
             });
 
             document.getElementById('marketsBody').innerHTML = rows;
+        }
+
+        function toggleShowAll() {
+            if (lastResult) {
+                renderMarketsTable(lastResult.markets, lastResult.mode === 'discovery');
+            }
         }
 
         function resetProgress() {
@@ -567,6 +749,8 @@
 
         function resetUI() {
             document.getElementById('resultSection').classList.add('hidden');
+            document.getElementById('showAllCheckbox').checked = false;
+            lastResult = null;
             resetProgress();
         }
 

@@ -36,6 +36,7 @@ const I18N = {
         simple_hint: '输入市场名称和钱包地址，获取完整的交易分析报告',
         simple_progress_fetching: '正在获取交易数据...',
         simple_progress_analyzing: '正在分析 Maker/Taker 角色...',
+        simple_discover_link: '自动发现每日 96 个加密市场？前往交易员分析',
         simple_btn_cancel: '取消查询',
         simple_btn_new_query: '新查询',
         simple_download_chart: '图表',
@@ -150,6 +151,30 @@ const I18N = {
         home_trader_title: '交易员分析',
         home_trader_desc: '分析交易员在特定市场类型的全天交易日志，查看盈亏、胜率、各市场明细。',
 
+        // 发现模式
+        trader_coin_label: '币种（发现模式）',
+        trader_coin_hint: '选择币种自动发现所有市场',
+        trader_coin_none: '不选（关键词搜索）',
+        trader_discovery_note: '发现模式：将自动查找该币种在选定日期的所有市场，然后检查交易员的交易记录。',
+        trader_date_required: '（发现模式必选）',
+        trader_btn_discover: '发现并分析',
+        trader_progress_discovering: '正在发现市场...',
+        trader_discovery_result: '发现 {discovered}/{cycles} 个 {coin} 市场，交易员参与了 {traded} 个',
+        trader_traded_markets: '参与/发现',
+        trader_show_all: '显示所有市场（含未交易）',
+        trader_no_trades: '未交易',
+        trader_error_no_date: '使用发现模式请选择日期',
+
+        // 多选项发现模式
+        multi_discover_tab: '发现市场',
+        multi_discover_coin: '币种',
+        multi_discover_interval: '时间间隔',
+        multi_discover_btn: '发现所有市场',
+        multi_discover_hint: '自动发现指定币种+间隔+日期的所有市场',
+        multi_discover_no_coin: '请选择币种',
+        multi_discover_no_interval: '请选择时间间隔',
+        multi_discover_found: '个市场已发现',
+
         // 错误消息
         error_no_market: '请输入市场名称',
         error_no_url: '请输入市场 URL',
@@ -198,6 +223,7 @@ const I18N = {
         simple_hint: 'Enter market name and wallet address to get complete trading analysis report',
         simple_progress_fetching: 'Fetching trade data...',
         simple_progress_analyzing: 'Analyzing Maker/Taker roles...',
+        simple_discover_link: 'Auto-discover all 96 crypto markets per day? Use Trader Analysis',
         simple_btn_cancel: 'Cancel',
         simple_btn_new_query: 'New Query',
         simple_download_chart: 'Chart',
@@ -311,6 +337,30 @@ const I18N = {
         trader_error_no_keyword: 'Please enter a custom keyword',
         home_trader_title: 'Trader Analysis',
         home_trader_desc: 'Analyze a trader\'s full day trade logs across a market type. View P&L, win rate, and per-market breakdown.',
+
+        // Discovery mode
+        trader_coin_label: 'Coin (Discovery Mode)',
+        trader_coin_hint: 'Select to auto-discover all markets',
+        trader_coin_none: 'None (keyword search)',
+        trader_discovery_note: 'Discovery mode: will find all markets for this coin on the selected date, then check trader\'s trades for each.',
+        trader_date_required: '(required for discovery)',
+        trader_btn_discover: 'Discover & Analyze',
+        trader_progress_discovering: 'Discovering markets...',
+        trader_discovery_result: 'Discovered {discovered}/{cycles} {coin} markets, trader participated in {traded}',
+        trader_traded_markets: 'Traded/Discovered',
+        trader_show_all: 'Show all markets (including untraded)',
+        trader_no_trades: 'No trades',
+        trader_error_no_date: 'Please select a date for discovery mode',
+
+        // Multi-option discovery mode
+        multi_discover_tab: 'Discover Markets',
+        multi_discover_coin: 'Coin',
+        multi_discover_interval: 'Interval',
+        multi_discover_btn: 'Discover All Markets',
+        multi_discover_hint: 'Auto-discover all crypto markets for a coin + interval + date',
+        multi_discover_no_coin: 'Please select a coin',
+        multi_discover_no_interval: 'Please select an interval',
+        multi_discover_found: 'markets discovered',
 
         // Error messages
         error_no_market: 'Please enter market name',

@@ -3,13 +3,14 @@
 Neg-Risk 交易分析模块
 用于识别和分析 Polymarket 多选项市场的 Neg-Risk 转换交易
 """
+import os
 import requests
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 
 # API 端点
 GAMMA_API_BASE = "https://gamma-api.polymarket.com"
-POLYGON_RPC_URL = "https://polygon-rpc.com"
+POLYGON_RPC_URL = os.environ.get('POLY_RPC_URL', 'https://polygon-rpc.com')
 
 # 合约地址
 CONTRACTS = {

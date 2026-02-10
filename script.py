@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 import datetime
@@ -228,8 +229,8 @@ CTF_EXCHANGE_ADDRESSES = {
 # OrderFilled 事件签名
 ORDER_FILLED_TOPIC = "0xd0a08e8c493f9c94f29311604c9de1b4e8c8d4c06bd0c789af57f2d65bfec0f6"
 
-# Polygon RPC (公开节点)
-POLYGON_RPC_URL = "https://polygon-rpc.com"
+# Polygon RPC (env configurable, default: public endpoint)
+POLYGON_RPC_URL = os.environ.get('POLY_RPC_URL', 'https://polygon-rpc.com')
 
 
 def get_maker_taker_role(tx_hash, user_address):
