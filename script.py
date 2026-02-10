@@ -317,8 +317,8 @@ def batch_get_maker_taker_roles(trades, user_address, cancel_flag=None):
     
     print(f"正在批量查询 {len(unique_hashes)} 笔交易的 maker/taker 角色...")
     
-    # 分批处理，每批最多 10 个请求 (公开 RPC 对大批量请求不稳定)
-    batch_size = 10
+    # 分批处理，每批最多 25 个请求
+    batch_size = 25
     for batch_start in range(0, len(unique_hashes), batch_size):
         # 检查是否取消
         if cancel_flag:
@@ -327,7 +327,7 @@ def batch_get_maker_taker_roles(trades, user_address, cancel_flag=None):
             # 更新进度百分比 (Maker/Taker 查询阶段占 20%-80%)
             progress = batch_start * 60 // len(unique_hashes)  # 0-60
             cancel_flag["percent"] = 20 + progress  # 20-80
-        
+
         batch_hashes = unique_hashes[batch_start:batch_start + batch_size]
         
         # 构建批量请求
@@ -409,7 +409,11 @@ def batch_get_maker_taker_roles(trades, user_address, cancel_flag=None):
         # 显示进度
         done = min(batch_start + batch_size, len(unique_hashes))
         print(f"  进度: {done}/{len(unique_hashes)} ({done * 100 // len(unique_hashes)}%)")
-    
+
+        # Rate-limit between batches to avoid exceeding RPC compute units/second
+        if batch_start + batch_size < len(unique_hashes):
+            time.sleep(0.5)
+
     return roles
 
 
