@@ -10,7 +10,7 @@ import threading
 import time
 from flask import Flask, render_template, request, jsonify, send_from_directory, make_response
 
-from script import run_analysis
+from script import run_analysis, batch_get_maker_taker_roles, CancelledError
 from slug_discovery import COIN_SLUGS, INTERVALS, discover_markets, generate_day_slugs, slug_to_time
 import database as db
 
@@ -512,10 +512,14 @@ def trader_report(task_id):
             lines.append('')
 
             # Maker/Taker Stats
+            maker_count = sum(1 for t in parsed_list if t.get('maker_taker') == 'MAKER')
+            taker_count = sum(1 for t in parsed_list if t.get('maker_taker') == 'TAKER')
+            unknown_count = tc - maker_count - taker_count
             lines.append(f'--- Maker/Taker Stats ---')
-            lines.append(f'MAKER (Limit Order): 0 trades')
-            lines.append(f'TAKER (Market Order): 0 trades')
-            lines.append(f'UNKNOWN: {tc} trades')
+            lines.append(f'MAKER (Limit Order): {maker_count} trades')
+            lines.append(f'TAKER (Market Order): {taker_count} trades')
+            if unknown_count > 0:
+                lines.append(f'UNKNOWN: {unknown_count} trades')
             lines.append('')
 
             # Position Change Records (detailed trade table)
@@ -597,13 +601,44 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
     TRADES_URL = 'https://data-api.polymarket.com/trades'
     ACTIVITY_URL = 'https://data-api.polymarket.com/activity'
 
+    def _fetch_trades_paginated(session, cid, user_addr, page_limit=500):
+        """Paginated fetch from trades API for a single conditionId."""
+        trades = []
+        offset = 0
+        while True:
+            try:
+                resp = session.get(TRADES_URL, params={
+                    'market': cid,
+                    'user': user_addr,
+                    'limit': page_limit,
+                    'offset': offset,
+                    'takerOnly': 'false',
+                }, timeout=30)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception:
+                break
+            if isinstance(data, dict):
+                batch = data.get('trades', [])
+            elif isinstance(data, list):
+                batch = data
+            else:
+                batch = []
+            trades.extend(batch)
+            if len(batch) < page_limit:
+                break
+            offset += page_limit
+            time.sleep(0.15)
+        return trades
+
     def fetch_event_trades(ev, session):
         """Fetch trades for all condition IDs in an event using trades API with activity fallback.
         Uses pagination to retrieve ALL trades (matching script.py fetch_trades pattern).
-        Error handling is per-request so a single failed page doesn't lose all prior results."""
+        Cross-validates conditionIds via public-search to handle neg-risk ID mismatches."""
         event_trades = []
         event_cids = []
         page_limit = 500
+        SEARCH_URL = 'https://gamma-api.polymarket.com/public-search'
 
         for m in ev.get('markets', []):
             cid = m.get('condition_id', '')
@@ -611,33 +646,31 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
                 continue
             event_cids.append(cid)
 
-            # Try trades API first with pagination (per-request error handling)
-            cid_trades = []
-            offset = 0
-            while True:
+            # Primary: fetch using slug-discovered conditionId
+            cid_trades = _fetch_trades_paginated(session, cid, address, page_limit)
+            print(f"[DIAG] slug-cid={cid[:16]}... trades={len(cid_trades)}")
+
+            # Cross-validate: try public-search conditionId if market has a slug
+            market_slug = m.get('slug', '')
+            if market_slug:
                 try:
-                    resp = session.get(TRADES_URL, params={
-                        'market': cid,
-                        'user': address,
-                        'limit': page_limit,
-                        'offset': offset,
-                        'takerOnly': 'false',
-                    }, timeout=30)
-                    resp.raise_for_status()
-                    data = resp.json()
-                except Exception:
-                    break
-                if isinstance(data, dict):
-                    batch = data.get('trades', [])
-                elif isinstance(data, list):
-                    batch = data
-                else:
-                    batch = []
-                cid_trades.extend(batch)
-                if len(batch) < page_limit:
-                    break
-                offset += page_limit
-                time.sleep(0.15)
+                    search_resp = session.get(SEARCH_URL, params={'q': market_slug}, timeout=10)
+                    if search_resp.status_code == 200:
+                        search_data = search_resp.json()
+                        for se in search_data.get('events', []):
+                            for sm in se.get('markets', []):
+                                alt_cid = sm.get('conditionId', '')
+                                if alt_cid and alt_cid != cid:
+                                    alt_trades = _fetch_trades_paginated(session, alt_cid, address, page_limit)
+                                    print(f"[DIAG] search-cid={alt_cid[:16]}... trades={len(alt_trades)} (alt for {market_slug})")
+                                    if len(alt_trades) > len(cid_trades):
+                                        print(f"[DIAG] Using search-cid (more trades: {len(alt_trades)} > {len(cid_trades)})")
+                                        cid_trades = alt_trades
+                                        event_cids[-1] = alt_cid
+                                    break
+                            break
+                except Exception as e:
+                    print(f"[DIAG] public-search fallback failed for {market_slug}: {e}")
 
             if cid_trades:
                 event_trades.extend(cid_trades)
@@ -711,6 +744,16 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
                 pass
 
     cancel_flag['percent'] = 90
+
+    # Diagnostic: log per-event trade counts
+    total_fetched = 0
+    for ev in events:
+        ev_trades, ev_cids = trades_results.get(ev['slug'], ([], []))
+        count = len(ev_trades)
+        total_fetched += count
+        if count > 0:
+            print(f"[DIAG] Event {ev.get('time_label', ev['slug'])}: {count} trades, cids={[c[:16] for c in ev_cids]}")
+    print(f"[DIAG] Total fetched trades: {total_fetched} across {len(events)} events")
 
     # Phase 3: Analyze results and compute stats (90-95%)
     market_results = []
@@ -851,6 +894,7 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
                     'cost': raw_price * size,
                     'timestamp': int(t_item.get('timestamp', 0)),
                     'maker_taker': 'UNKNOWN',
+                    'tx_hash': t_item.get('transactionHash', ''),
                     'source': 'Trade',
                     'record_type': 'trade',
                 })
@@ -950,6 +994,32 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
             'cum_no_cost_total': round(buy_cost_1, 2),
             'parsed_trades': parsed_trades,
         })
+
+    cancel_flag['percent'] = 95
+
+    # Phase 3.5: Resolve maker/taker roles via Polygon RPC
+    all_raw_for_rpc = []
+    for mr in market_results:
+        if mr.get('traded') and mr.get('trades'):
+            all_raw_for_rpc.extend(mr['trades'])
+
+    if all_raw_for_rpc and address:
+        try:
+            maker_taker_roles = batch_get_maker_taker_roles(all_raw_for_rpc, address, cancel_flag)
+        except CancelledError:
+            tasks[task_id]['status'] = 'cancelled'
+            tasks[task_id]['error'] = 'Cancelled' if lang == 'en' else '已取消'
+            return
+        except Exception as e:
+            print(f"[WARNING] Maker/taker resolution failed: {e}")
+            maker_taker_roles = {}
+
+        # Apply roles to all parsed trades
+        for mr in market_results:
+            for pt in mr.get('parsed_trades', []):
+                tx_h = pt.get('tx_hash', '')
+                if tx_h and tx_h in maker_taker_roles:
+                    pt['maker_taker'] = maker_taker_roles[tx_h]
 
     cancel_flag['percent'] = 95
 
@@ -1253,6 +1323,7 @@ def _run_activity_analysis(task_id, cancel_flag, address, market_type, search_ke
                     'cost': raw_price * sz,
                     'timestamp': int(t_item.get('timestamp', 0)),
                     'maker_taker': 'UNKNOWN',
+                    'tx_hash': t_item.get('transactionHash', ''),
                     'source': 'Trade',
                     'record_type': 'trade',
                 })
@@ -1352,6 +1423,31 @@ def _run_activity_analysis(task_id, cancel_flag, address, market_type, search_ke
         })
 
         cancel_flag['percent'] = 50 + int((idx + 1) / total_markets * 40)
+
+    cancel_flag['percent'] = 90
+
+    # Step 4.5: Resolve maker/taker roles via Polygon RPC
+    all_raw_for_rpc = []
+    for mr in market_results:
+        if mr.get('traded') and mr.get('trades'):
+            all_raw_for_rpc.extend(mr['trades'])
+
+    if all_raw_for_rpc and address:
+        try:
+            maker_taker_roles = batch_get_maker_taker_roles(all_raw_for_rpc, address, cancel_flag)
+        except CancelledError:
+            tasks[task_id]['status'] = 'cancelled'
+            tasks[task_id]['error'] = 'Cancelled' if lang == 'en' else '已取消'
+            return
+        except Exception as e:
+            print(f"[WARNING] Maker/taker resolution failed: {e}")
+            maker_taker_roles = {}
+
+        for mr in market_results:
+            for pt in mr.get('parsed_trades', []):
+                tx_h = pt.get('tx_hash', '')
+                if tx_h and tx_h in maker_taker_roles:
+                    pt['maker_taker'] = maker_taker_roles[tx_h]
 
     cancel_flag['percent'] = 90
 
