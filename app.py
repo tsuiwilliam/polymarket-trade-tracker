@@ -410,7 +410,7 @@ def trader_report(task_id):
         row = f'{i:>3}  {title:<58} {trades_str:>6}  {buy_str:>12}  {sell_str:>12}  {net_str:>12}  {status:<8}  {pnl_str:>12}  {time_lbl:<6}'
         lines.append(row)
 
-    # Detailed per-market sections with full trade logs
+    # Detailed per-market sections with full analytics and trade logs
     traded = [m for m in markets if m.get('traded')]
     if traded:
         lines.append('')
@@ -419,56 +419,118 @@ def trader_report(task_id):
         lines.append('=' * 80)
 
         for i, m in enumerate(traded, 1):
+            o0 = m.get('outcome_0_name', 'Up')
+            o1 = m.get('outcome_1_name', 'Down')
+            tc = m.get('trade_count', 0)
+
             lines.append('')
             lines.append('=' * 80)
             lines.append(f'Market #{i}: {m.get("title", "")}')
             lines.append('=' * 80)
             lines.append('')
-            lines.append(f'Condition ID:   {m.get("condition_id", "")}')
-            lines.append(f'Event Slug:     {m.get("event_slug", "")}')
-            lines.append(f'Time Window:    {m.get("time_label", "")}')
-            lines.append(f'Trade Count:    {m.get("trade_count", 0)}')
-            lines.append(f'Buy Cost:       $ {m.get("buy_cost", 0):.2f}')
-            lines.append(f'Sell Revenue:   $ {m.get("sell_revenue", 0):.2f}')
-            lines.append(f'Net Exposure:   $ {m.get("net_exposure", 0):.2f}')
-            lines.append(f'Outcomes:       {m.get("outcome_0_name", "Up")} / {m.get("outcome_1_name", "Down")}')
-            lines.append(f'Remaining {m.get("outcome_0_name", "Up"):>4}: {m.get("remaining_0", 0):.2f} shares')
-            lines.append(f'Remaining {m.get("outcome_1_name", "Down"):>4}: {m.get("remaining_1", 0):.2f} shares')
+
+            # Market header
+            lines.append(f'Wallet Address: {summary.get("address", "")}')
+            lines.append(f'Username:       {summary.get("username", "")}')
+            lines.append('')
+            lines.append(f'Market:         {m.get("title", "")}')
 
             if m.get('is_resolved'):
-                lines.append(f'Status:         Settled ({m.get("resolved_side", "?")})')
+                lines.append(f'Market Status:  Settled')
+                lines.append(f'Settlement:     {m.get("resolved_side", "?")}')
+            else:
+                lines.append(f'Market Status:  Unsettled')
+
+            lines.append(f'Trade Count:    {tc}')
+
+            # Time range from parsed trades
+            parsed_list = m.get('parsed_trades', [])
+            if parsed_list:
+                first_ts = parsed_list[0].get('timestamp', 0)
+                last_ts = parsed_list[-1].get('timestamp', 0)
+                start_str = dt.datetime.fromtimestamp(first_ts).strftime('%Y-%m-%d %H:%M:%S') if first_ts else 'N/A'
+                end_str = dt.datetime.fromtimestamp(last_ts).strftime('%Y-%m-%d %H:%M:%S') if last_ts else 'N/A'
+                lines.append(f'Time Range:     {start_str} to {end_str}')
+            else:
+                lines.append(f'Time Range:     {m.get("time_range", "N/A")}')
+
+            lines.append(f'Price Range:    {m.get("min_price", 0):.2f} - {m.get("max_price", 0):.2f}')
+            lines.append('')
+
+            # Position at Settlement / Current Position
+            if m.get('is_resolved'):
+                lines.append(f'--- Position at Settlement ---')
+                lines.append(f'Remaining {o0} Shares: {m.get("remaining_0", 0):.2f}')
+                lines.append(f'Remaining {o1} Shares: {m.get("remaining_1", 0):.2f}')
+                fv = m.get('final_value')
+                if fv is not None:
+                    lines.append(f'Final Value:    $ {fv:.2f}')
+                lines.append(f'Total Spent (Net Exposure): $ {m.get("net_exposure", 0):.2f}')
                 pnl_val = m.get('pnl')
                 if pnl_val is not None:
                     pnl_sign = '+' if pnl_val > 0 else ''
-                    lines.append(f'P&L:            {pnl_sign}$ {pnl_val:.2f}')
+                    lines.append(f'Final P&L:      {pnl_sign}$ {pnl_val:.2f}')
             else:
-                lines.append(f'Status:         Open / Unsettled')
+                lines.append(f'--- Current Position ---')
+                lines.append(f'Remaining {o0} Shares: {m.get("remaining_0", 0):.2f}')
+                lines.append(f'Remaining {o1} Shares: {m.get("remaining_1", 0):.2f}')
+                lines.append(f'Total Spent (Net Exposure): $ {m.get("net_exposure", 0):.2f}')
+            lines.append('')
 
-            lines.append(f'Trade Time:     {m.get("time_range", "")}')
+            # Buy/Sell Summary
+            lines.append(f'--- Buy/Sell Summary ---')
+            lines.append(f'{o0} Buy:  {m.get("buy_shares_0", 0):.2f} sh / $ {m.get("buy_cost_0", 0):.2f}')
+            lines.append(f'{o0} Sell: {m.get("sell_shares_0", 0):.2f} sh / $ {m.get("sell_cost_0", 0):.2f}')
+            lines.append(f'{o1} Buy:  {m.get("buy_shares_1", 0):.2f} sh / $ {m.get("buy_cost_1", 0):.2f}')
+            lines.append(f'{o1} Sell: {m.get("sell_shares_1", 0):.2f} sh / $ {m.get("sell_cost_1", 0):.2f}')
+            lines.append('')
 
-            # Trade log table
-            trade_list = m.get('trades', [])
-            if trade_list:
+            # Cumulative Buy
+            lines.append(f'--- Cumulative Buy ---')
+            lines.append(f'{o0} Cumulative: {m.get("cum_yes_total", 0):.2f} sh / $ {m.get("cum_yes_cost_total", 0):.2f}')
+            lines.append(f'{o1} Cumulative: {m.get("cum_no_total", 0):.2f} sh / $ {m.get("cum_no_cost_total", 0):.2f}')
+            lines.append('')
+
+            # Exposure Peak
+            lines.append(f'--- Exposure Peak (Trade #: chronological) ---')
+            lines.append(f'{o0} Dollar Peak: $ {m.get("yes_peak_val", 0):.2f} at Trade #{m.get("yes_peak_idx", 0) + 1}')
+            lines.append(f'{o1} Dollar Peak: $ {m.get("no_peak_val", 0):.2f} at Trade #{m.get("no_peak_idx", 0) + 1}')
+            lines.append(f'{o0} Share Peak:  {m.get("yes_sh_peak_val", 0):.2f} sh at Trade #{m.get("yes_sh_peak_idx", 0) + 1}')
+            lines.append(f'{o1} Share Peak:  {m.get("no_sh_peak_val", 0):.2f} sh at Trade #{m.get("no_sh_peak_idx", 0) + 1}')
+            lines.append('')
+
+            # Final Exposure
+            lines.append(f'--- Final Exposure ---')
+            lines.append(f'{o0} Exposure: $ {m.get("final_yes_exp", 0):.2f} | {m.get("final_yes_sh", 0):.2f} sh')
+            lines.append(f'{o1} Exposure: $ {m.get("final_no_exp", 0):.2f} | {m.get("final_no_sh", 0):.2f} sh')
+            lines.append(f'Net Exposure:  $ {m.get("final_net_exp", 0):.2f} | {m.get("final_net_sh", 0):.2f} sh')
+            lines.append('')
+
+            # Position Change Source Stats
+            lines.append(f'--- Position Change Source Stats ---')
+            lines.append(f'Direct Trade: {tc} trades')
+            lines.append('')
+
+            # Maker/Taker Stats
+            lines.append(f'--- Maker/Taker Stats ---')
+            lines.append(f'MAKER (Limit Order): 0 trades')
+            lines.append(f'TAKER (Market Order): 0 trades')
+            lines.append(f'UNKNOWN: {tc} trades')
+            lines.append('')
+
+            # Position Change Records (detailed trade table)
+            if parsed_list:
+                lines.append(f'--- Position Change Records ({len(parsed_list)} trades) ---')
                 lines.append('')
-                lines.append(f'--- Trade Log ({len(trade_list)} trades) ---')
-                lines.append(f'{"#":>4} | {"Time":<19} | {"Type":<4} | {"Dir":<5} | {"Price":>8} | {"Shares":>10} | {"Cost($)":>10}')
-                lines.append(f'{"----":>4}-+-{"-" * 19}-+-{"----":<4}-+-{"-----":<5}-+-{"-" * 8}-+-{"-" * 10}-+-{"-" * 10}')
+                lines.append(f'{"":>4} | {"Time":<19} | {"Source":<8} | {"Direction":<14} | {"Shares":>8} | {"Price":>6} | {"Cost($)":>10} | {"Note"}')
+                lines.append(f'-----+---------------------+----------+----------------+----------+--------+------------+---------------------------')
 
-                for j, t in enumerate(trade_list, 1):
-                    ts = int(t.get('timestamp', 0))
+                for j, t in enumerate(parsed_list, 1):
+                    ts = t.get('timestamp', 0)
                     dt_str = dt.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S') if ts else '-'
-                    side = t.get('side', '').upper()
-                    size = float(t.get('size', 0))
-                    price = float(t.get('price', 0))
-                    cost = size * price
-                    outcome = t.get('outcome', '')
-                    if not outcome:
-                        outcome_idx = int(t.get('outcomeIndex', 0))
-                        outcome = m.get('outcome_0_name', 'Up') if outcome_idx == 0 else m.get('outcome_1_name', 'Down')
-
+                    direction = f'{t["type"]} {t["side"]}'
                     lines.append(
-                        f'{j:>4} | {dt_str:<19} | {side:<4} | {outcome:<5} | '
-                        f'{price:>8.4f} | {size:>10.2f} | $ {cost:>8.2f}'
+                        f'{j:>4} | {dt_str} | {"direct":<8} | {direction:<14} | {t["shares"]:8.2f} | {t["price"]:6.2f} | $ {t["cost"]:8.2f} | {t.get("maker_taker", "UNKNOWN")}'
                     )
 
     lines.append('')
@@ -655,15 +717,18 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
         first_time = None
         last_time = None
 
+        # Initialize detailed analytics fields (overridden if trades exist)
+        buy_cost_0 = sell_cost_0 = buy_cost_1 = sell_cost_1 = 0.0
+        buy_shares_0 = sell_shares_0 = buy_shares_1 = sell_shares_1 = 0.0
+        yes_peak_val = no_peak_val = yes_sh_peak_val = no_sh_peak_val = 0.0
+        yes_peak_idx = no_peak_idx = yes_sh_peak_idx = no_sh_peak_idx = 0
+        final_yes_exp = final_no_exp = final_yes_sh = final_no_sh = 0.0
+        final_net_exp = final_net_sh = 0.0
+        min_price = max_price = 0.0
+        final_value = None
+        parsed_trades = []
+
         if event_trades:
-            buy_cost_0 = 0.0
-            sell_cost_0 = 0.0
-            buy_cost_1 = 0.0
-            sell_cost_1 = 0.0
-            buy_shares_0 = 0.0
-            sell_shares_0 = 0.0
-            buy_shares_1 = 0.0
-            sell_shares_1 = 0.0
             outcome_names = {}
 
             for t_item in event_trades:
@@ -739,6 +804,73 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
         # Sort trades by timestamp for the report
         sorted_trades = sorted(event_trades, key=lambda x: int(x.get('timestamp', 0)))
 
+        # Parse trades into enriched format and compute full analytics
+        if sorted_trades:
+            for t_item in sorted_trades:
+                raw_side = t_item.get('side', 'BUY').upper()
+                outcome_idx = int(t_item.get('outcomeIndex', 0))
+                outcome_name = t_item.get('outcome', '')
+                if not outcome_name:
+                    outcome_name = outcome_0_name if outcome_idx == 0 else outcome_1_name
+                raw_price = float(t_item.get('price', 0))
+                size = float(t_item.get('size', 0))
+                parsed_trades.append({
+                    'type': 'Buy' if raw_side == 'BUY' else 'Sell',
+                    'side': outcome_name,
+                    'outcomeIndex': outcome_idx,
+                    'price': raw_price * 100.0,
+                    'shares': size,
+                    'cost': raw_price * size,
+                    'timestamp': int(t_item.get('timestamp', 0)),
+                    'maker_taker': 'UNKNOWN',
+                    'source': 'Trade',
+                    'record_type': 'trade',
+                })
+
+            # Compute exposure curves
+            yes_exp = no_exp = 0.0
+            yes_sh_exp = no_sh_exp = 0.0
+            yes_curve = []
+            no_curve = []
+            yes_sh_curve = []
+            no_sh_curve = []
+
+            for e in parsed_trades:
+                is_outcome_0 = (e['outcomeIndex'] == 0)
+                if is_outcome_0:
+                    yes_exp += e['cost'] if e['type'] == 'Buy' else -e['cost']
+                    yes_sh_exp += e['shares'] if e['type'] == 'Buy' else -e['shares']
+                else:
+                    no_exp += e['cost'] if e['type'] == 'Buy' else -e['cost']
+                    no_sh_exp += e['shares'] if e['type'] == 'Buy' else -e['shares']
+                yes_curve.append(yes_exp)
+                no_curve.append(no_exp)
+                yes_sh_curve.append(yes_sh_exp)
+                no_sh_curve.append(no_sh_exp)
+
+            # Exposure peaks
+            yes_peak_idx = max(range(len(yes_curve)), key=lambda i: yes_curve[i])
+            no_peak_idx = max(range(len(no_curve)), key=lambda i: no_curve[i])
+            yes_sh_peak_idx = max(range(len(yes_sh_curve)), key=lambda i: yes_sh_curve[i])
+            no_sh_peak_idx = max(range(len(no_sh_curve)), key=lambda i: no_sh_curve[i])
+            yes_peak_val = yes_curve[yes_peak_idx]
+            no_peak_val = no_curve[no_peak_idx]
+            yes_sh_peak_val = yes_sh_curve[yes_sh_peak_idx]
+            no_sh_peak_val = no_sh_curve[no_sh_peak_idx]
+
+            # Final exposure
+            final_yes_exp = yes_curve[-1]
+            final_no_exp = no_curve[-1]
+            final_yes_sh = yes_sh_curve[-1]
+            final_no_sh = no_sh_curve[-1]
+            final_net_exp = final_yes_exp + final_no_exp
+            final_net_sh = final_yes_sh + final_no_sh
+
+            # Price range (in cents)
+            prices = [e['price'] for e in parsed_trades]
+            min_price = min(prices)
+            max_price = max(prices)
+
         market_results.append({
             'condition_id': event_cids[0] if event_cids else '',
             'title': event_title,
@@ -758,6 +890,37 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
             'time_range': time_range,
             'traded': trade_count > 0,
             'trades': sorted_trades,
+            # Full analytics fields
+            'buy_cost_0': round(buy_cost_0, 2),
+            'sell_cost_0': round(sell_cost_0, 2),
+            'buy_cost_1': round(buy_cost_1, 2),
+            'sell_cost_1': round(sell_cost_1, 2),
+            'buy_shares_0': round(buy_shares_0, 2),
+            'sell_shares_0': round(sell_shares_0, 2),
+            'buy_shares_1': round(buy_shares_1, 2),
+            'sell_shares_1': round(sell_shares_1, 2),
+            'yes_peak_val': round(yes_peak_val, 2),
+            'yes_peak_idx': yes_peak_idx,
+            'no_peak_val': round(no_peak_val, 2),
+            'no_peak_idx': no_peak_idx,
+            'yes_sh_peak_val': round(yes_sh_peak_val, 2),
+            'yes_sh_peak_idx': yes_sh_peak_idx,
+            'no_sh_peak_val': round(no_sh_peak_val, 2),
+            'no_sh_peak_idx': no_sh_peak_idx,
+            'final_yes_exp': round(final_yes_exp, 2),
+            'final_no_exp': round(final_no_exp, 2),
+            'final_yes_sh': round(final_yes_sh, 2),
+            'final_no_sh': round(final_no_sh, 2),
+            'final_net_exp': round(final_net_exp, 2),
+            'final_net_sh': round(final_net_sh, 2),
+            'min_price': round(min_price, 2),
+            'max_price': round(max_price, 2),
+            'final_value': round(final_value, 2) if final_value is not None else None,
+            'cum_yes_total': round(buy_shares_0, 2),
+            'cum_no_total': round(buy_shares_1, 2),
+            'cum_yes_cost_total': round(buy_cost_0, 2),
+            'cum_no_cost_total': round(buy_cost_1, 2),
+            'parsed_trades': parsed_trades,
         })
 
     cancel_flag['percent'] = 95
@@ -954,6 +1117,15 @@ def _run_activity_analysis(task_id, cancel_flag, address, market_type, search_ke
         buy_cost_1 = 0.0
         sell_cost_1 = 0.0
 
+        # Initialize detailed analytics fields
+        yes_peak_val = no_peak_val = yes_sh_peak_val = no_sh_peak_val = 0.0
+        yes_peak_idx = no_peak_idx = yes_sh_peak_idx = no_sh_peak_idx = 0
+        final_yes_exp = final_no_exp = final_yes_sh = final_no_sh = 0.0
+        final_net_exp = final_net_sh = 0.0
+        min_price = max_price = 0.0
+        final_value = None
+        parsed_trades = []
+
         outcome_names = {}
         first_time = None
         last_time = None
@@ -1034,6 +1206,73 @@ def _run_activity_analysis(task_id, cancel_flag, address, market_type, search_ke
             t_date = dt.datetime.fromtimestamp(first_time).strftime('%Y-%m-%d')
             time_range = f'{t_date} {t_start} - {t_end}'
 
+        # Parse trades into enriched format and compute full analytics
+        if trades:
+            for t_item in trades:
+                raw_side = t_item.get('side', 'BUY').upper()
+                oidx = int(t_item.get('outcomeIndex', 0))
+                oname = t_item.get('outcome', '')
+                if not oname:
+                    oname = outcome_0_name if oidx == 0 else outcome_1_name
+                raw_price = float(t_item.get('price', 0))
+                sz = float(t_item.get('size', 0))
+                parsed_trades.append({
+                    'type': 'Buy' if raw_side == 'BUY' else 'Sell',
+                    'side': oname,
+                    'outcomeIndex': oidx,
+                    'price': raw_price * 100.0,
+                    'shares': sz,
+                    'cost': raw_price * sz,
+                    'timestamp': int(t_item.get('timestamp', 0)),
+                    'maker_taker': 'UNKNOWN',
+                    'source': 'Trade',
+                    'record_type': 'trade',
+                })
+
+            # Compute exposure curves
+            yes_exp = no_exp = 0.0
+            yes_sh_exp = no_sh_exp = 0.0
+            yes_curve = []
+            no_curve = []
+            yes_sh_curve = []
+            no_sh_curve = []
+
+            for e in parsed_trades:
+                is_outcome_0 = (e['outcomeIndex'] == 0)
+                if is_outcome_0:
+                    yes_exp += e['cost'] if e['type'] == 'Buy' else -e['cost']
+                    yes_sh_exp += e['shares'] if e['type'] == 'Buy' else -e['shares']
+                else:
+                    no_exp += e['cost'] if e['type'] == 'Buy' else -e['cost']
+                    no_sh_exp += e['shares'] if e['type'] == 'Buy' else -e['shares']
+                yes_curve.append(yes_exp)
+                no_curve.append(no_exp)
+                yes_sh_curve.append(yes_sh_exp)
+                no_sh_curve.append(no_sh_exp)
+
+            # Exposure peaks
+            yes_peak_idx = max(range(len(yes_curve)), key=lambda i: yes_curve[i])
+            no_peak_idx = max(range(len(no_curve)), key=lambda i: no_curve[i])
+            yes_sh_peak_idx = max(range(len(yes_sh_curve)), key=lambda i: yes_sh_curve[i])
+            no_sh_peak_idx = max(range(len(no_sh_curve)), key=lambda i: no_sh_curve[i])
+            yes_peak_val = yes_curve[yes_peak_idx]
+            no_peak_val = no_curve[no_peak_idx]
+            yes_sh_peak_val = yes_sh_curve[yes_sh_peak_idx]
+            no_sh_peak_val = no_sh_curve[no_sh_peak_idx]
+
+            # Final exposure
+            final_yes_exp = yes_curve[-1]
+            final_no_exp = no_curve[-1]
+            final_yes_sh = yes_sh_curve[-1]
+            final_no_sh = no_sh_curve[-1]
+            final_net_exp = final_yes_exp + final_no_exp
+            final_net_sh = final_yes_sh + final_no_sh
+
+            # Price range (in cents)
+            prices_list = [e['price'] for e in parsed_trades]
+            min_price = min(prices_list)
+            max_price = max(prices_list)
+
         market_results.append({
             'condition_id': cid,
             'title': title,
@@ -1049,6 +1288,39 @@ def _run_activity_analysis(task_id, cancel_flag, address, market_type, search_ke
             'resolved_side': resolved_side,
             'pnl': round(pnl, 2) if pnl is not None else None,
             'time_range': time_range,
+            'traded': trade_count > 0,
+            'trades': trades,
+            # Full analytics fields
+            'buy_cost_0': round(buy_cost_0, 2),
+            'sell_cost_0': round(sell_cost_0, 2),
+            'buy_cost_1': round(buy_cost_1, 2),
+            'sell_cost_1': round(sell_cost_1, 2),
+            'buy_shares_0': round(buy_shares_0, 2),
+            'sell_shares_0': round(sell_shares_0, 2),
+            'buy_shares_1': round(buy_shares_1, 2),
+            'sell_shares_1': round(sell_shares_1, 2),
+            'yes_peak_val': round(yes_peak_val, 2),
+            'yes_peak_idx': yes_peak_idx,
+            'no_peak_val': round(no_peak_val, 2),
+            'no_peak_idx': no_peak_idx,
+            'yes_sh_peak_val': round(yes_sh_peak_val, 2),
+            'yes_sh_peak_idx': yes_sh_peak_idx,
+            'no_sh_peak_val': round(no_sh_peak_val, 2),
+            'no_sh_peak_idx': no_sh_peak_idx,
+            'final_yes_exp': round(final_yes_exp, 2),
+            'final_no_exp': round(final_no_exp, 2),
+            'final_yes_sh': round(final_yes_sh, 2),
+            'final_no_sh': round(final_no_sh, 2),
+            'final_net_exp': round(final_net_exp, 2),
+            'final_net_sh': round(final_net_sh, 2),
+            'min_price': round(min_price, 2),
+            'max_price': round(max_price, 2),
+            'final_value': round(final_value, 2) if final_value is not None else None,
+            'cum_yes_total': round(buy_shares_0, 2),
+            'cum_no_total': round(buy_shares_1, 2),
+            'cum_yes_cost_total': round(buy_cost_0, 2),
+            'cum_no_cost_total': round(buy_cost_1, 2),
+            'parsed_trades': parsed_trades,
         })
 
         cancel_flag['percent'] = 50 + int((idx + 1) / total_markets * 40)
