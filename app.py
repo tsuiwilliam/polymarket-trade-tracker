@@ -410,38 +410,66 @@ def trader_report(task_id):
         row = f'{i:>3}  {title:<58} {trades_str:>6}  {buy_str:>12}  {sell_str:>12}  {net_str:>12}  {status:<8}  {pnl_str:>12}  {time_lbl:<6}'
         lines.append(row)
 
-    # Detailed per-market sections for traded markets
+    # Detailed per-market sections with full trade logs
     traded = [m for m in markets if m.get('traded')]
     if traded:
         lines.append('')
         lines.append('=' * 80)
-        lines.append('DETAILED MARKET ANALYSIS')
+        lines.append('DETAILED MARKET ANALYSIS WITH TRADE LOGS')
         lines.append('=' * 80)
 
         for i, m in enumerate(traded, 1):
             lines.append('')
-            lines.append(f'--- Market #{i}: {m.get("title", "")} ---')
-            lines.append(f'  Condition ID:   {m.get("condition_id", "")}')
-            lines.append(f'  Event Slug:     {m.get("event_slug", "")}')
-            lines.append(f'  Time Window:    {m.get("time_label", "")}')
-            lines.append(f'  Trades:         {m.get("trade_count", 0)}')
-            lines.append(f'  Buy Cost:       $ {m.get("buy_cost", 0):.2f}')
-            lines.append(f'  Sell Revenue:   $ {m.get("sell_revenue", 0):.2f}')
-            lines.append(f'  Net Exposure:   $ {m.get("net_exposure", 0):.2f}')
-            lines.append(f'  Outcomes:       {m.get("outcome_0_name", "Up")} / {m.get("outcome_1_name", "Down")}')
-            lines.append(f'  Remaining {m.get("outcome_0_name", "Up"):>4}: {m.get("remaining_0", 0):.2f} shares')
-            lines.append(f'  Remaining {m.get("outcome_1_name", "Down"):>4}: {m.get("remaining_1", 0):.2f} shares')
+            lines.append('=' * 80)
+            lines.append(f'Market #{i}: {m.get("title", "")}')
+            lines.append('=' * 80)
+            lines.append('')
+            lines.append(f'Condition ID:   {m.get("condition_id", "")}')
+            lines.append(f'Event Slug:     {m.get("event_slug", "")}')
+            lines.append(f'Time Window:    {m.get("time_label", "")}')
+            lines.append(f'Trade Count:    {m.get("trade_count", 0)}')
+            lines.append(f'Buy Cost:       $ {m.get("buy_cost", 0):.2f}')
+            lines.append(f'Sell Revenue:   $ {m.get("sell_revenue", 0):.2f}')
+            lines.append(f'Net Exposure:   $ {m.get("net_exposure", 0):.2f}')
+            lines.append(f'Outcomes:       {m.get("outcome_0_name", "Up")} / {m.get("outcome_1_name", "Down")}')
+            lines.append(f'Remaining {m.get("outcome_0_name", "Up"):>4}: {m.get("remaining_0", 0):.2f} shares')
+            lines.append(f'Remaining {m.get("outcome_1_name", "Down"):>4}: {m.get("remaining_1", 0):.2f} shares')
 
             if m.get('is_resolved'):
-                lines.append(f'  Status:         Settled ({m.get("resolved_side", "?")})')
+                lines.append(f'Status:         Settled ({m.get("resolved_side", "?")})')
                 pnl_val = m.get('pnl')
                 if pnl_val is not None:
                     pnl_sign = '+' if pnl_val > 0 else ''
-                    lines.append(f'  P&L:            {pnl_sign}$ {pnl_val:.2f}')
+                    lines.append(f'P&L:            {pnl_sign}$ {pnl_val:.2f}')
             else:
-                lines.append(f'  Status:         Open / Unsettled')
+                lines.append(f'Status:         Open / Unsettled')
 
-            lines.append(f'  Trade Time:     {m.get("time_range", "")}')
+            lines.append(f'Trade Time:     {m.get("time_range", "")}')
+
+            # Trade log table
+            trade_list = m.get('trades', [])
+            if trade_list:
+                lines.append('')
+                lines.append(f'--- Trade Log ({len(trade_list)} trades) ---')
+                lines.append(f'{"#":>4} | {"Time":<19} | {"Type":<4} | {"Dir":<5} | {"Price":>8} | {"Shares":>10} | {"Cost($)":>10}')
+                lines.append(f'{"----":>4}-+-{"-" * 19}-+-{"----":<4}-+-{"-----":<5}-+-{"-" * 8}-+-{"-" * 10}-+-{"-" * 10}')
+
+                for j, t in enumerate(trade_list, 1):
+                    ts = int(t.get('timestamp', 0))
+                    dt_str = dt.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S') if ts else '-'
+                    side = t.get('side', '').upper()
+                    size = float(t.get('size', 0))
+                    price = float(t.get('price', 0))
+                    cost = size * price
+                    outcome = t.get('outcome', '')
+                    if not outcome:
+                        outcome_idx = int(t.get('outcomeIndex', 0))
+                        outcome = m.get('outcome_0_name', 'Up') if outcome_idx == 0 else m.get('outcome_1_name', 'Down')
+
+                    lines.append(
+                        f'{j:>4} | {dt_str:<19} | {side:<4} | {outcome:<5} | '
+                        f'{price:>8.4f} | {size:>10.2f} | $ {cost:>8.2f}'
+                    )
 
     lines.append('')
     lines.append('=' * 80)
@@ -708,6 +736,9 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
             t_end = dt.datetime.fromtimestamp(last_time).strftime('%H:%M:%S')
             time_range = f'{time_label} ({t_start}-{t_end})'
 
+        # Sort trades by timestamp for the report
+        sorted_trades = sorted(event_trades, key=lambda x: int(x.get('timestamp', 0)))
+
         market_results.append({
             'condition_id': event_cids[0] if event_cids else '',
             'title': event_title,
@@ -726,6 +757,7 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
             'pnl': round(pnl, 2) if pnl is not None else None,
             'time_range': time_range,
             'traded': trade_count > 0,
+            'trades': sorted_trades,
         })
 
     cancel_flag['percent'] = 95
@@ -1602,12 +1634,19 @@ def status(task_id):
     }
     
     if task['status'] == 'completed':
-        response['result'] = task['result']
+        result = task['result']
+        # Strip raw trade logs from discovery results to keep response small
+        if result and result.get('mode') == 'discovery' and result.get('markets'):
+            import copy
+            result = copy.deepcopy(result)
+            for m in result['markets']:
+                m.pop('trades', None)
+        response['result'] = result
     elif task['status'] == 'error':
         response['error'] = task['error']
     elif task['status'] == 'cancelled':
         response['error'] = task['error']
-    
+
     return jsonify(response)
 
 
