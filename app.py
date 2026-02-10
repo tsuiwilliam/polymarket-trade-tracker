@@ -620,6 +620,7 @@ def _run_discovery_analysis(task_id, cancel_flag, address, coin, interval, date_
                         'user': address,
                         'limit': page_limit,
                         'offset': offset,
+                        'takerOnly': 'false',
                     }, timeout=15)
                     if resp.status_code != 200:
                         break
