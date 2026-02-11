@@ -317,10 +317,11 @@ def batch_get_maker_taker_roles(trades, user_address, cancel_flag=None):
 
     print(f"正在批量查询 {len(unique_hashes)} 笔交易的 maker/taker 角色...")
 
-    # Conservative batch size: eth_getTransactionReceipt = 15 CU each
-    # Alchemy free tier rate limit is strict; keep batches small
-    batch_size = 3
-    batch_delay = 2.0  # seconds between batches
+    # eth_getTransactionReceipt = 15 CU each
+    # Alchemy free tier: 500 CU/s → target 90% = 450 CU/s = 30 receipts/s
+    # batch_size=15 @ 0.5s delay = 30/s = 450 CU/s
+    batch_size = 15
+    batch_delay = 0.5  # seconds between batches
 
     for batch_start in range(0, len(unique_hashes), batch_size):
         # 检查是否取消
